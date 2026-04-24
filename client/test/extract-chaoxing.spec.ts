@@ -101,4 +101,42 @@ describe('extractQuestionsFromChaoxing', () => {
     document.body.innerHTML = '<div>hello</div>';
     expect(extractQuestionsFromChaoxing(document)).toEqual([]);
   });
+
+  test('同源 iframe 内的 TiMu 也能被递归提取', async () => {
+    // 构造：主页面是空的，iframe 内才是题目
+    document.body.innerHTML = '<iframe id="work-iframe"></iframe>';
+    const iframe = document.getElementById('work-iframe') as HTMLIFrameElement;
+
+    // happy-dom 下 iframe.contentDocument 存在；等下个 tick 它 hydrate
+    await new Promise((r) => setTimeout(r, 0));
+    const innerDoc = iframe.contentDocument!;
+    expect(innerDoc).toBeTruthy();
+
+    // 把 fixture Q1 放进 iframe
+    innerDoc.body.innerHTML = fixtures[0]!.outerHTML;
+
+    const qs = extractQuestionsFromChaoxing(document);
+    expect(qs).toHaveLength(1);
+    expect(qs[0]!.platform_id).toBe('405405676');
+  });
+
+  test('跨域 iframe 访问 contentDocument 失败时不抛', () => {
+    // 模拟跨域 iframe：把 contentDocument getter 改成 throw
+    document.body.innerHTML = '<iframe id="xo"></iframe>';
+    const iframe = document.getElementById('xo') as HTMLIFrameElement;
+    Object.defineProperty(iframe, 'contentDocument', {
+      get() {
+        throw new DOMException('cross-origin', 'SecurityError');
+      },
+    });
+
+    // 也在主 document 放一条 TiMu，确认跨域失败不影响主 doc
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = fixtures[1]!.outerHTML;
+    document.body.appendChild(wrapper);
+
+    expect(() => extractQuestionsFromChaoxing(document)).not.toThrow();
+    const qs = extractQuestionsFromChaoxing(document);
+    expect(qs.length).toBeGreaterThanOrEqual(1);
+  });
 });

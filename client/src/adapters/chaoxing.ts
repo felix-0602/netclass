@@ -5,6 +5,8 @@
 //   - app.js:5032 getAnswer（原脚本的接入点，本 adapter 的上游）
 
 import { decryptDocument } from '../decode/cxsecret';
+import { jumpNextChaoxingTask } from '../time-padder/chaoxing-task';
+import { startChaoxingMediaPadders } from '../time-padder/chaoxing-video';
 import type { ExtractedQuestion, QuestionOption, QuestionType, TexSpan } from './types';
 
 // TiMu 里 data-属性值的 questiontype 映射
@@ -17,11 +19,42 @@ const QTYPE_MAP: Record<string, QuestionType> = {
   '4': 'essay',
 };
 
-export function bootChaoxing(): void {
-  // Phase 0 Week 1：识别当前页面类型后派发。
-  // 目前仅做 placeholder 打印——真实 router 在 main.ts 或独立 orchestrator 里做。
+/**
+ * Phase 0 Week 1：启动超星刷时长闭环。
+ *
+ * 在当前 document 以及所有同源 iframe 内找 <video>/<audio>，挂上
+ * padder；当视频播完触发 `onEnded` 时自动等 3 秒后点"下一章节" 按钮。
+ *
+ * 返回一个清理函数，外部可在路由切换时解绑所有监听。
+ */
+export function bootChaoxing(rootDoc: Document = document): () => void {
   // eslint-disable-next-line no-console
-  console.info('[netclass-sidekick/chaoxing] adapter 已加载');
+  console.info('[netclass-sidekick/chaoxing] adapter 启动');
+
+  const docs = collectSameOriginDocs(rootDoc);
+  const cleanups: Array<() => void> = [];
+
+  // 避免视频结束后多次触发（一页可能有多个 iframe 都含同一个结束事件）
+  let hasJumped = false;
+
+  for (const d of docs) {
+    if (!isDocument(d)) continue;
+
+    const cleanup = startChaoxingMediaPadders(d, {
+      onEnded: () => {
+        if (hasJumped) return;
+        hasJumped = true;
+        // 触发跳转，但失败不致命——log 即可
+        void jumpNextChaoxingTask({ root: rootDoc }).then((result) => {
+          // eslint-disable-next-line no-console
+          console.info('[netclass-sidekick/chaoxing] 跳转结果:', result.status);
+        });
+      },
+    });
+    cleanups.push(cleanup);
+  }
+
+  return () => cleanups.forEach((fn) => fn());
 }
 
 /**
