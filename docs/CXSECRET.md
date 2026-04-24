@@ -24,66 +24,64 @@ DOM text:    "已知微抮方程 抦通解为"     ← 爬虫看到
 // @resource ttf https://www.forestpolice.org/ttf/2.0/table.json
 ```
 
-这是第三方维护的已经逆向出来的映射表 JSON 文件。格式大约是：
+**关键修正（2026-04-24 实测）**：映射表**不是**"混淆字 → 真实字"的直接查表，而是 `glyph_hash → real_codepoint`。
+格式：
 
 ```json
 {
-  "抮": "分",
-  "抦": "的",
-  "抧": "初",
-  "抨": "值",
-  "抩": "满",
-  "抪": "条件",  // 可能多字符映射
+  "10434866": 23247,
+  "10583225": 34076,
   ...
 }
 ```
+
+共 20906 条（355 KB）。Keys 是 `md5(JSON.stringify(glyph_path)).slice(24)`，Values 是目标 Unicode codepoint。
+
+完整算法（见 `app.js:4884-4932` 的 `decrypt`）：
+
+1. 找页面 `<style>` 标签里含 `font-cxsecret` 的 `@font-face`
+2. 提 base64 编码的 ttf → ArrayBuffer
+3. 用 Typr.js 解析 ttf
+4. 遍历 CJK 范围 `U+4E00..U+9FA6`：
+   - `font.codeToGlyph(code)` → glyph 对象
+   - `font.glyphToPath(glyph)` → SVG path 数组
+   - `md5(JSON.stringify(path)).slice(24)` → hash
+   - 查 `table[hash]` → 真实 codepoint
+   - 构建 `match[code] = realCode`
+5. 把 DOM 里 `.font-cxsecret` 元素里每个出现的字符按 `match` 替换
+6. 移除 `font-cxsecret` class 避免重复解
 
 ## 3. 实装位置
 
 `client/src/decode/cxsecret.ts`:
 
 ```typescript
+import { Font } from './_vendor/typr-font.js';
+import md5 from 'blueimp-md5';
 import table from './table.json';
 
-/**
- * 解超星 font-cxsecret 字体混淆
- * @param node DOM 节点或其 innerText
- * @returns 解码后的纯文本
- */
-export function decodeCxsecret(input: string): string {
-  let out = '';
-  // 遍历每个字符（注意：表里有多字符映射 key，需要贪婪匹配）
-  let i = 0;
-  while (i < input.length) {
-    // 先尝试 2 字符 key（表里偶尔有）
-    if (i + 1 < input.length) {
-      const two = input.substring(i, i + 2);
-      if (two in table) {
-        out += (table as any)[two];
-        i += 2;
-        continue;
-      }
-    }
-    const one = input[i];
-    out += one in table ? (table as any)[one] : one;
-    i += 1;
-  }
-  return out;
+export function buildFontMatch(doc: Document): FontMatchMap {
+  // 见文件完整实现
 }
 
-/**
- * 判断一个 DOM 节点是否需要解码（是否 font-cxsecret）
- */
-export function needsDecode(el: Element): boolean {
-  // 向上查 font-cxsecret class
-  let cur: Element | null = el;
-  while (cur) {
-    if (cur.classList?.contains('font-cxsecret')) return true;
-    cur = cur.parentElement;
-  }
-  return false;
+export function decryptDocumentInPlace(doc: Document, match: FontMatchMap): void {
+  // 原地改 DOM
+}
+
+export function decodeCxsecretWithMatch(input: string, match: FontMatchMap): string {
+  // 纯函数版，单元测试用
+}
+
+export function decryptDocument(doc: Document): FontMatchMap {
+  const match = buildFontMatch(doc);
+  decryptDocumentInPlace(doc, match);
+  return match;
 }
 ```
+
+`client/src/decode/_vendor/typr-font.js` 是从原 `app.js:1775-4883` 原样抽取的
+Typr.js + Font 封装（3128 行）。**不要改**——表里的 hash 是按这版 Typr 的 path
+序列化算出来的，版本漂移就全失配。
 
 ## 4. 更新策略
 
@@ -93,33 +91,24 @@ export function needsDecode(el: Element): boolean {
 2. **自检**：每次解码后把解码结果 hash 上报到 `/telemetry`，服务端统计"解码失败率"（比如解完还有大量中文伪字 `抮` `抦`）。超过阈值自动报警
 3. **离线兜底**：表拉失败 → 用 bundle 进脚本里的快照（冻结某个时间点的表）
 
-## 5. 单元测试（必写）
+## 5. 单元测试
 
-`test/e2e/decode-cxsecret.spec.ts`：
+`client/test/decode-cxsecret.spec.ts` 覆盖两类：
 
-```typescript
-import { decodeCxsecret } from '../../client/src/decode/cxsecret';
-
-test('recon fixture: 高数 Q1 题干解码', () => {
-  const obfuscated = '已知微抮方程  抦通解为 ，抩抨足抧值抰抪';
-  const expected = '已知微分方程  的通解为 ，满足初值条件';
-  expect(decodeCxsecret(obfuscated)).toBe(expected);
-});
-
-test('不含 font-cxsecret 的文本原样返回', () => {
-  expect(decodeCxsecret('已知微分方程')).toBe('已知微分方程');
-});
-
-test('英文字符不混淆，直接透传', () => {
-  expect(decodeCxsecret('The Grand Canal')).toBe('The Grand Canal');
-});
-```
+- **纯函数 `decodeCxsecretWithMatch(input, match)`**：单测时构造 mock match map，
+  不依赖真实字体。已跑通 8 条 case。
+- **`buildFontMatch(doc)` + `decryptDocument(doc)`**：需要真实 ttf base64 + DOM。
+  属于 E2E 范畴，在 `client/test/e2e/extract-chaoxing.spec.ts` 里用 Playwright
+  加载 fixture HTML 跑。
 
 ## 6. 已知坑
 
-- 表不保证完整。漏字时 `decodeCxsecret` 会原样透传该字符，这会导致 hash 不稳定。**服务端应宽容**：同一 questionId 允许有 2-3 个不同 hash（超星 questionId 是稳定主键），hash 仅作次要去重
-- 多字符 key 的贪婪匹配要小心：如 `"抪"` 映射到 `"条件"`（1→2），直接替换后字符串长度变了，position 计算要注意
-- 选项里的图片 alt 文本也可能被混淆过。合图前**全部解一遍**
+- **首次解耗时 50-200ms**（20906 次 glyph path 遍历 + md5）。调用方应缓存
+  「每个页面的字体 → match」，别每道题都重跑
+- **表 ≠ 100% 完整**。漏 hash 时那个字符原样保留。**服务端应宽容**：优先用
+  超星暴露的 `questionId` 作主键，text hash 作次要去重
+- 选项里的图片 alt 文本也可能被混淆过。合图前 `innerText` 都跑一遍解码
+- **vendored `_vendor/typr-font.js` 原样不动**。版本漂移 = 全部 hash 失配 = 题库归零
 
 ## 7. 反制超星二次反制的预案
 
