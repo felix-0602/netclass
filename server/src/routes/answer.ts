@@ -71,9 +71,8 @@ route.post('/', async (c) => {
     });
   }
 
-  const courseSig = body.context
-    ? `${body.context.course_id ?? ''}:${body.context.knowledge_id ?? ''}`
-    : null;
+  // context_json 存完整 context 对象；course_sig 字段放 questions 表（本 insert 不用）
+  const contextJson = body.context ? JSON.stringify(body.context) : null;
 
   const now = Math.floor(Date.now() / 1000);
   await c.env.DB.prepare(
@@ -89,7 +88,7 @@ route.post('/', async (c) => {
       JSON.stringify(body.options),
       JSON.stringify(body.tex_spans),
       imageKey,
-      courseSig,
+      contextJson,
       5, // default priority
       jwt.sub,
       now,

@@ -6,11 +6,11 @@
 --   node -e "require('crypto').createHash('sha256').update('NSK-TEST-0001').digest('hex')"
 -- 得到 hex 填进 INSERT
 
--- NSK-TEST-0001 永久
+-- NSK-TEST-0001 永久（用户 = 本地开发 founder 自己）
 INSERT OR IGNORE INTO users (id, cardkey_hash, plan, monthly_exp, created_at)
 VALUES (
   'user-seed-0001',
-  '64ed9b6d3c35f68f14a26c2c44a63ae4a9b7a5e6f1b5acea0fb42f80e05fb0e2', -- placeholder sha256，部署前用 node 重算
+  'b9ca83883cf18884ac4fb1849fcd9745fe69b396362d47fb6d7fd2696fe8a4e8',
   'lifetime',
   NULL,
   strftime('%s', 'now')
