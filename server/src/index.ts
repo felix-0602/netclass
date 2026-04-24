@@ -10,6 +10,7 @@ import contributeRoute from './routes/contribute';
 import otaRoute from './routes/ota';
 import adminPendingRoute from './routes/admin/pending';
 import adminSubmitRoute from './routes/admin/submit';
+import adminUnbindRoute from './routes/admin/unbind-device';
 import type { D1LikeDatabase } from './lib/db-sqlite-adapter';
 
 /**
@@ -72,6 +73,7 @@ app.route('/ota', otaRoute);
 // 管理员路由
 app.route('/admin/pending', adminPendingRoute);
 app.route('/admin/submit', adminSubmitRoute);
+app.route('/admin/unbind-device', adminUnbindRoute);
 
 // 404
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'No such route' } }, 404));
