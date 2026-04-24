@@ -1,25 +1,11 @@
-import path from 'node:path';
-import {
-  defineWorkersConfig,
-  readD1Migrations,
-} from '@cloudflare/vitest-pool-workers/config';
+import { defineConfig } from 'vitest/config';
 
-export default defineWorkersConfig(async () => {
-  const migrationsPath = path.join(__dirname, 'src/db/migrations');
-  const migrations = await readD1Migrations(migrationsPath);
+// 从 Cloudflare Workers Pool 迁回纯 Node vitest 后的配置
+// better-sqlite3 + @hono/node-server 都是 Node 原生，无需特殊 pool
 
-  return {
-    test: {
-      setupFiles: ['./test/apply-migrations.ts'],
-      poolOptions: {
-        workers: {
-          singleWorker: true,
-          wrangler: { configPath: './wrangler.toml' },
-          miniflare: {
-            bindings: { TEST_MIGRATIONS: migrations },
-          },
-        },
-      },
-    },
-  };
+export default defineConfig({
+  test: {
+    environment: 'node',
+    globals: false,
+  },
 });

@@ -2,27 +2,28 @@
   "name": "@netclass/server",
   "version": "0.1.0-alpha",
   "private": true,
-  "description": "Netclass Sidekick Cloudflare Workers server",
+  "description": "Netclass Sidekick server (Node + Hono + SQLite)",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "src/server.ts",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "db:migrate:local": "wrangler d1 migrations apply netclass-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply netclass-db --remote"
+    "db:migrate": "tsx src/db/apply-migrations.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.0",
+    "better-sqlite3": "^12.9.0",
     "hono": "^4.6.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.5.0",
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^4.20260424.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.0",
-    "vitest": "2.1.9",
-    "wrangler": "^3.99.0"
+    "vitest": "2.1.9"
   }
 }

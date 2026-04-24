@@ -60,3 +60,8 @@ coverage/
 
 # gstack telemetry / session state (local only)
 .gstack/
+
+# sqlite 运行时文件
+server/netclass.db
+server/netclass.db-*
+server/.env
