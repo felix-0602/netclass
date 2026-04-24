@@ -32,11 +32,12 @@ export default defineConfig({
           'https://ucontent.unipus.cn/*',
         ],
         connect: [
-          // OTA + answer 服务端域名（本地开发指 miniflare localhost）
+          // 本地开发
           'localhost',
           '127.0.0.1',
-          // Phase 1 起切 CF Workers 真域名（TODO 部署时填入）
-          // 'netclass-sidekick.<your>.workers.dev',
+          // Phase 0 生产：腾讯云轻量 广州节点 裸 IP
+          '182.254.180.181',
+          // Phase 2 如果加域名再写进来
         ],
         grant: [
           'GM_xmlhttpRequest',

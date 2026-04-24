@@ -40,11 +40,14 @@ export type AnswerResponse =
     };
 
 export interface ClientConfig {
-  serverBase: string; // e.g. 'http://localhost:8787' 或生产 workers.dev
+  serverBase: string; // e.g. 'http://localhost:8080' 或 'http://182.254.180.181:8080'
   jwt: string; // 用户激活卡密后拿到的 JWT
   clientVersion: string;
   deviceFingerprint: string;
 }
+
+/** Phase 0 生产服务端默认地址（腾讯云轻量 广州）。用户可在 Panel 里改 */
+export const DEFAULT_SERVER_BASE = 'http://182.254.180.181:8080';
 
 let CONFIG: ClientConfig | null = null;
 
