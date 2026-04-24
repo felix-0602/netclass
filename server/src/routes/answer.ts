@@ -70,11 +70,15 @@ route.post('/', async (c) => {
 
   let imageKey: string | null = null;
   if (body.composite_image_b64) {
-    imageKey = `stitched/${serverHash}.png`;
-    const bytes = Uint8Array.from(atob(body.composite_image_b64), (ch) => ch.charCodeAt(0));
-    await c.env.STORAGE.put(imageKey, bytes, {
-      httpMetadata: { contentType: 'image/png' },
-    });
+    if (c.env.STORAGE) {
+      imageKey = `stitched/${serverHash}.png`;
+      const bytes = Uint8Array.from(atob(body.composite_image_b64), (ch) => ch.charCodeAt(0));
+      await c.env.STORAGE.put(imageKey, bytes, {
+        httpMetadata: { contentType: 'image/png' },
+      });
+    }
+    // R2 未启用时：丢弃图片，降级为纯文本题。Phase 0 先允许
+    // （大多数 Phase 0 课程是纯文本，数学题占比低）
   }
 
   const contextJson = body.context ? JSON.stringify(body.context) : null;

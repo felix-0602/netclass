@@ -12,7 +12,10 @@ import adminSubmitRoute from './routes/admin/submit';
 
 export interface Env {
   DB: D1Database;
-  STORAGE: R2Bucket;
+  /** R2 bucket — Phase 0 可选。未绑定时数学题合成图和 OTA 脚本分发会降级 */
+  STORAGE?: R2Bucket;
+  /** STORAGE bucket 的公共访问前缀（pub-<id>.r2.dev），可选 */
+  STORAGE_PUBLIC_BASE?: string;
   JWT_SECRET: string;
   ADMIN_KEY: string;
   PROTOCOL_VERSION: string;

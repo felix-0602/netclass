@@ -11,13 +11,18 @@ PROTOCOL_VERSION = "1.0.0-alpha"
 [[d1_databases]]
 binding = "DB"
 database_name = "netclass-db"
-database_id = "PLACEHOLDER_RUN_wrangler_d1_create_AFTER_LOGIN"
+database_id = "a45c1fa3-11ec-4427-9ccb-9fecb2adcc13"
 migrations_dir = "src/db/migrations"
 
 # R2 绑定（对象存储：合成图 + OTA 脚本）
-[[r2_buckets]]
-binding = "STORAGE"
-bucket_name = "netclass-storage"
+# 暂时注释掉——Phase 0 先不用 R2，等用户需要数学题或 OTA 时再启用
+# 启用步骤：
+#   1) Cloudflare dashboard 启用 R2（要能绑定支付方式，国内用户可考虑 WildCard 虚拟卡）
+#   2) npx wrangler r2 bucket create netclass-storage
+#   3) 取消下面注释，重新 deploy
+# [[r2_buckets]]
+# binding = "STORAGE"
+# bucket_name = "netclass-storage"
 
 # 敏感配置走 wrangler secret put，不 commit：
 #   wrangler secret put JWT_SECRET

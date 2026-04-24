@@ -27,10 +27,11 @@ route.post('/', async (c) => {
   const jwt = c.get('jwt');
 
   // 若带图，存 R2（跟 /answer 一样，但 key 前缀 contributions/）
+  // R2 未启用时丢弃图片，仅入库文本。
   let imageKey: string | null = null;
-  if (body.composite_image_b64) {
+  if (body.composite_image_b64 && c.env.STORAGE) {
     imageKey = `contributions/${body.hash}-${Date.now()}.png`;
-    const bytes = Uint8Array.from(atob(body.composite_image_b64), (c) => c.charCodeAt(0));
+    const bytes = Uint8Array.from(atob(body.composite_image_b64), (ch) => ch.charCodeAt(0));
     await c.env.STORAGE.put(imageKey, bytes, {
       httpMetadata: { contentType: 'image/png' },
     });
