@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
 import { requireJwt } from '../lib/auth';
+import { hashQuestion } from '../lib/hash';
 import type { JwtPayload } from '../lib/jwt';
 import type { QuestionRow } from '../lib/types';
 
@@ -8,9 +9,6 @@ const route = new Hono<{ Bindings: Env; Variables: { jwt: JwtPayload } }>();
 
 route.use('*', requireJwt);
 
-// POST /answer
-// hash 查命中 → 返回 answer
-// miss → 写 pending_q，返回 pending 状态
 route.post('/', async (c) => {
   const body = await c.req.json<{
     platform: 'chaoxing' | 'zhihuishu' | 'unipus';
@@ -33,23 +31,33 @@ route.post('/', async (c) => {
     return c.json({ error: { code: 'missing_fields', message: 'hash/type/platform 必填' } }, 400);
   }
 
+  const serverHash = await hashQuestion({
+    platform: body.platform,
+    type: body.type,
+    text: body.text,
+    options: body.options,
+    tex_spans: body.tex_spans,
+  });
+
+  if (body.hash !== serverHash) {
+    return c.json({ error: { code: 'hash_mismatch' } }, 400);
+  }
+
   const jwt = c.get('jwt');
 
-  // 先查命中
   const hit = await c.env.DB.prepare(
     'SELECT id, answer_json, confidence, source, last_hit FROM questions WHERE id = ?',
   )
-    .bind(body.hash)
+    .bind(serverHash)
     .first<Pick<QuestionRow, 'id' | 'answer_json' | 'confidence' | 'source' | 'last_hit'>>();
 
   if (hit) {
     const now = Math.floor(Date.now() / 1000);
-    // 异步 +1 hit_count；不 await（Workers 里用 c.executionCtx.waitUntil）
     c.executionCtx.waitUntil(
       c.env.DB.prepare(
         'UPDATE questions SET hit_count = hit_count + 1, last_hit = ? WHERE id = ?',
       )
-        .bind(now, body.hash)
+        .bind(now, serverHash)
         .run(),
     );
     return c.json({
@@ -60,28 +68,25 @@ route.post('/', async (c) => {
     });
   }
 
-  // miss → 写 pending
-  // 若有合成图，先存 R2
   let imageKey: string | null = null;
   if (body.composite_image_b64) {
-    imageKey = `stitched/${body.hash}.png`;
-    const bytes = Uint8Array.from(atob(body.composite_image_b64), (c) => c.charCodeAt(0));
+    imageKey = `stitched/${serverHash}.png`;
+    const bytes = Uint8Array.from(atob(body.composite_image_b64), (ch) => ch.charCodeAt(0));
     await c.env.STORAGE.put(imageKey, bytes, {
       httpMetadata: { contentType: 'image/png' },
     });
   }
 
-  // context_json 存完整 context 对象；course_sig 字段放 questions 表（本 insert 不用）
   const contextJson = body.context ? JSON.stringify(body.context) : null;
-
   const now = Math.floor(Date.now() / 1000);
+
   await c.env.DB.prepare(
     `INSERT OR IGNORE INTO pending_q
        (id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, submitted_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
   )
     .bind(
-      body.hash,
+      serverHash,
       body.platform,
       body.type,
       body.text,
@@ -89,7 +94,7 @@ route.post('/', async (c) => {
       JSON.stringify(body.tex_spans),
       imageKey,
       contextJson,
-      5, // default priority
+      5,
       jwt.sub,
       now,
     )

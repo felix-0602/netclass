@@ -6,8 +6,6 @@ const route = new Hono<{ Bindings: Env }>();
 
 route.use('*', requireAdmin);
 
-// POST /admin/submit
-// cc-worker 把答案批量回写进 questions + 从 pending_q 删除
 route.post('/', async (c) => {
   const body = await c.req.json<{
     answers: Array<{
@@ -29,7 +27,6 @@ route.post('/', async (c) => {
 
   for (const a of body.answers) {
     try {
-      // 先查 pending_q 拿到完整题目元信息
       const pending = await c.env.DB.prepare(
         'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json FROM pending_q WHERE id = ?',
       )
@@ -46,10 +43,7 @@ route.post('/', async (c) => {
         }>();
 
       if (!pending) {
-        // 也许别人已经 submit 过了
-        const existing = await c.env.DB.prepare('SELECT id FROM questions WHERE id = ?')
-          .bind(a.id)
-          .first();
+        const existing = await c.env.DB.prepare('SELECT id FROM questions WHERE id = ?').bind(a.id).first();
         if (existing) {
           rejected.push({ id: a.id, reason: 'already_answered' });
           continue;
@@ -65,12 +59,13 @@ route.post('/', async (c) => {
           })()
         : null;
 
-      await c.env.DB.batch([
+      const results = await c.env.DB.batch([
         c.env.DB.prepare(
-          `INSERT OR REPLACE INTO questions
+          `INSERT INTO questions
              (id, platform, q_type, text, options_json, tex_spans_json, image_key, course_sig,
               answer_json, confidence, source, verified_by, hit_count, first_seen, last_hit, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'founder', 0, ?, NULL, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'founder', 0, ?, NULL, ?)
+           ON CONFLICT(id) DO NOTHING`,
         ).bind(
           pending.id,
           pending.platform,
@@ -86,8 +81,13 @@ route.post('/', async (c) => {
           now,
           now,
         ),
-        c.env.DB.prepare('DELETE FROM pending_q WHERE id = ?').bind(pending.id),
+        c.env.DB.prepare('DELETE FROM pending_q WHERE id = ? AND changes() > 0').bind(pending.id),
       ]);
+
+      if ((results[0].meta.changes ?? 0) === 0) {
+        rejected.push({ id: a.id, reason: 'already_answered' });
+        continue;
+      }
 
       accepted.push(a.id);
     } catch (e) {

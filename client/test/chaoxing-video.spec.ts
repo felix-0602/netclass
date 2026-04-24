@@ -1,88 +1,126 @@
-import { describe, expect, test, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { attachVideoPadder } from '../src/time-padder/chaoxing-video';
 
-/**
- * happy-dom 的 HTMLVideoElement 没有真实 play/pause 动作，但事件派发仍可工作。
- * 我们通过 stub play/pause + 手动 dispatchEvent 来测行为。
- */
-
 function makeStubbedVideo(): HTMLVideoElement {
-  const v = document.createElement('video');
-  // stub play：记录被调次数
-  (v as any).play = vi.fn().mockResolvedValue(undefined);
-  return v;
+  const video = document.createElement('video');
+  Object.defineProperty(video, 'play', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockResolvedValue(undefined),
+  });
+  return video;
 }
 
 describe('attachVideoPadder', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
   });
 
-  test('挂载后会设置 muted + playbackRate + 自动 play', () => {
-    const v = makeStubbedVideo();
-    document.body.appendChild(v);
+  test('sets muted, playbackRate, and autoplay on attach', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
 
-    attachVideoPadder(v);
+    attachVideoPadder(video);
 
-    expect(v.muted).toBe(true);
-    expect(v.playbackRate).toBeGreaterThanOrEqual(0.5);
-    expect(v.playbackRate).toBeLessThanOrEqual(2);
-    expect((v.play as any)).toHaveBeenCalled();
+    expect(video.muted).toBe(true);
+    expect(video.playbackRate).toBeGreaterThanOrEqual(0.5);
+    expect(video.playbackRate).toBeLessThanOrEqual(2);
+    expect(video.play).toHaveBeenCalled();
   });
 
-  test('mute: false 保持不静音', () => {
-    const v = makeStubbedVideo();
-    document.body.appendChild(v);
+  test('keeps audio on when mute is false', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
 
-    attachVideoPadder(v, { mute: false });
-    expect(v.muted).toBe(false);
+    attachVideoPadder(video, { mute: false });
+
+    expect(video.muted).toBe(false);
   });
 
-  test('pause 后延时 3 秒自动恢复播放', () => {
-    const v = makeStubbedVideo();
-    document.body.appendChild(v);
+  test('resumes after a short pause jitter', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
 
-    attachVideoPadder(v, { resumeDelaySec: 3 });
+    attachVideoPadder(video, { resumeDelaySec: 3 });
+    (video.play as ReturnType<typeof vi.fn>).mockClear();
 
-    // 清除启动时的 play 调用记录
-    (v.play as any).mockClear();
-
-    v.dispatchEvent(new Event('pause'));
-    expect((v.play as any)).not.toHaveBeenCalled();
+    video.dispatchEvent(new Event('play'));
+    video.dispatchEvent(new Event('pause'));
+    expect(video.play).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(3001);
-    expect((v.play as any)).toHaveBeenCalled();
+    expect(video.play).toHaveBeenCalledTimes(1);
   });
 
-  test('ended 触发 onEnded 回调且不再触发 resume', () => {
-    const v = makeStubbedVideo();
-    document.body.appendChild(v);
+  test('does not resume after a user pause', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+
+    attachVideoPadder(video, { resumeDelaySec: 3 });
+    (video.play as ReturnType<typeof vi.fn>).mockClear();
+
+    video.dispatchEvent(new Event('play'));
+    vi.advanceTimersByTime(501);
+    video.dispatchEvent(new Event('pause'));
+    vi.advanceTimersByTime(3001);
+
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  test('does not resume when autoplay jitter is followed by play', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+
+    attachVideoPadder(video, { resumeDelaySec: 3 });
+    (video.play as ReturnType<typeof vi.fn>).mockClear();
+
+    video.dispatchEvent(new Event('play'));
+    video.dispatchEvent(new Event('pause'));
+    video.dispatchEvent(new Event('play'));
+    vi.advanceTimersByTime(3001);
+
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  test('calls onEnded and does not resume after ended', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
     const onEnded = vi.fn();
 
-    attachVideoPadder(v, { onEnded, resumeDelaySec: 3 });
-    (v.play as any).mockClear();
+    attachVideoPadder(video, { onEnded, resumeDelaySec: 3 });
+    (video.play as ReturnType<typeof vi.fn>).mockClear();
 
-    v.dispatchEvent(new Event('ended'));
+    video.dispatchEvent(new Event('ended'));
     vi.advanceTimersByTime(5000);
 
     expect(onEnded).toHaveBeenCalledTimes(1);
-    expect((v.play as any)).not.toHaveBeenCalled();
+    expect(video.play).not.toHaveBeenCalled();
   });
 
-  test('cleanup 函数能解绑 pause 监听', () => {
-    const v = makeStubbedVideo();
-    document.body.appendChild(v);
+  test('cleanup removes the pause listener', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
 
-    const cleanup = attachVideoPadder(v);
-    (v.play as any).mockClear();
+    const cleanup = attachVideoPadder(video);
+    (video.play as ReturnType<typeof vi.fn>).mockClear();
 
     cleanup();
-
-    v.dispatchEvent(new Event('pause'));
+    video.dispatchEvent(new Event('pause'));
     vi.advanceTimersByTime(5000);
 
-    // cleanup 后不应再触发 play
-    expect((v.play as any)).not.toHaveBeenCalled();
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  test('cleanup removes the play listener', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+    const removeEventListenerSpy = vi.spyOn(video, 'removeEventListener');
+
+    const cleanup = attachVideoPadder(video);
+    cleanup();
+
+    expect(removeEventListenerSpy).toHaveBeenCalledWith('play', expect.any(Function));
   });
 });
