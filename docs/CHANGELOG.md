@@ -5,6 +5,55 @@
 
 ## [Unreleased]
 
+### Phase 0 W3+ — 数学闭环 + 全课代戉 (2026-04-25)
+
+> 在 Phase 0 W3 基础上补完两个 Phase 1 TODO：数学题端到端可答 + 全自动走完整门课。
+
+#### Added
+
+**数学题闭环（C 系列）**
+- `server/src/lib/disk-storage.ts` — DiskStorage 类，仿 R2Bucket 的 put/get 子集 API。
+  R2 未启用时（Phase 0 默认）落本地盘。含 path traversal 防护、自动建多级目录、content-type 推断。
+- `server/src/env.ts` — 默认启用 disk storage，`DISK_STORAGE_PATH` env 可改路径，
+  `=__disabled__` 显式关掉。
+- `server/src/routes/admin/image.ts` — `GET /admin/image/:hash` 端点。drain worker
+  通过它从服务端拉合成图（不暴露公共 URL，admin key 鉴权）。
+- `client/src/answer/filler.ts` — 串 vision/compose：未命中本地缓存 + 题目含图片公式（`needsCompose(q)`）
+  → `composeQuestionImage` 合 N 张图为 1 张 PNG → base64 → `composite_image_b64`
+  随 `/answer` 上传。命中本地缓存就跳过 compose 节省 5-15s/题。
+- `cc-worker/drain-netclass.md` — drain skill 改走 `/admin/image/<hash>` 拉图（替原 R2 公共 URL）。
+
+**全课代戉（F 系列）**
+- `client/src/runtime/task-handlers.ts` — `processPptReader`（滚 #panView 到底）+
+  `processBook`（调 `_unsafeWindow.top.onchangepage(end)`）。对齐旧 app.js:5405-5421。
+- `client/src/runtime/course-runner.ts` — `runChapter` 编排单章节所有任务点 + 走完后自动跳下一节；
+  `startCourseRunner / stopCourseRunner` 全课 mode 入口；`courseProgress` 进度计数（已过 N 节）。
+- `client/src/main.ts` — 接线 PPT/eBook handler；automation=true 时走 runChapter
+  （含 jumpNext），手动扫描只 dispatch 不 jump。
+- `client/src/ui/Panel.vue` — 新增 "🚀 全课代戉" 主按钮 + "已过 N 节" 进度显示；
+  pill label 在 course mode 下显 "🚀 N 节"。
+- `client/src/runtime/state.ts` — `requestStartCourse / requestStopCourse` actions。
+
+#### Tests
+
+- `server/test/disk-storage.spec.ts` — 9 用例（put/get/has 路径校验/多级建目录/content-type 等）
+- `server/test/admin-image.spec.ts` — 5 用例（200/404/400/403/503 全分支）
+- `server/test/math-roundtrip.spec.ts` — 2 e2e（**完整数学链路**：
+  client 上传图 → 服务端落盘 → drain 拉图 → drain 写答 → 下次命中；以及 STORAGE 关时图片优雅丢失但 pending 仍写）
+
+**测试统计**：server 34 + client 137 + e2e 7 = **178 测试全绿**。
+typecheck 客户端 + 服务端均通过。
+client bundle 800KB（+12KB for course-runner + task-handlers）。
+
+#### Known issues / deferred to Phase 1
+
+- bundle 800KB（table.json inline 致），改 `@resource` 远程加载可瘤减回 ~135KB
+- course-runner 仅在 chaoxing 走通；unipus / 知到 全课 mode 待 Phase 1+
+- 听力题 STT pipeline 留 Phase 3
+- inference_logs 写入仍未实装（成本/延迟 dashboard 缺数据）
+
+---
+
 ### Phase 0 Week 3 — 自动答题闭环 + 舍友可用 (2026-04-24)
 
 **这一阶段的核心变化**：把旧版 app.js 的"发现即答题"闭环完整移植到模块化 TypeScript。

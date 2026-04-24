@@ -11,6 +11,8 @@
 import { extractQuestionsFromChaoxing } from '../adapters/chaoxing';
 import type { ExtractedQuestion } from '../adapters/types';
 import { patchRuntimeState } from '../runtime/state';
+import { blobToBase64, composeQuestionImage, type ImgRef } from '../vision/compose';
+import { cacheGet } from './cache';
 import { getAnswer } from './client';
 import { fillBlank } from './fill/blank';
 import { fillChoice } from './fill/choice';
@@ -110,6 +112,24 @@ export async function runFiller(
 
       try {
         const hash = await hashQuestion(q);
+
+        // 数学题闭环：本地未命中 + 含图片公式 → 合图 + base64 一次性发上去
+        // 已命中就跳过 compose（compose 慢，5-15s/题）
+        let composite_image_b64: string | undefined;
+        const cached = cacheGet(hash);
+        if (!cached && needsCompose(q)) {
+          patchRuntimeState({
+            phase: `compose ${i + 1}/${questions.length}`,
+            message: `合成 ${q.images.length} 张公式图`,
+          });
+          try {
+            composite_image_b64 = await composeAndEncode(q);
+          } catch (e) {
+            console.warn('[netclass-sidekick/filler] compose failed:', e);
+            // compose 失败仍尝试发文本，让服务端 pending 至少有 metadata
+          }
+        }
+
         const resp = await getAnswer({
           platform: q.platform,
           question_id: q.platform_id,
@@ -119,6 +139,7 @@ export async function runFiller(
           options: q.options,
           tex_spans: q.tex_spans,
           context: q.context,
+          composite_image_b64,
         });
 
         if (resp.status === 'hit') {
@@ -176,6 +197,47 @@ export async function runFiller(
   } finally {
     restoreAlert();
   }
+}
+
+/**
+ * 判断是否需要合图：题目里有图片公式（tex_spans 里 image_idx 非空 + 对应图片 url 存在）。
+ * 纯文本题 / 已有 LaTeX 源的题 不走 compose（节省 5-15 秒/题）。
+ */
+function needsCompose(q: ExtractedQuestion): boolean {
+  if (!q.images || q.images.length === 0) return false;
+  // 至少有一个 tex_span 是"无 latex 源 + 有 image_idx"，意味着公式只能靠图识别
+  return q.tex_spans.some((t) => t.latex === null && t.image_idx !== null);
+}
+
+/** 把题目里所有公式图按 stem/option 角色组织成 ImgRef[]，调 vision/compose 合一张 */
+async function composeAndEncode(q: ExtractedQuestion): Promise<string> {
+  const refs = buildImgRefs(q);
+  if (refs.length === 0) {
+    throw new Error('needsCompose=true but no usable image refs');
+  }
+  const blob = await composeQuestionImage(refs);
+  return await blobToBase64(blob);
+}
+
+function buildImgRefs(q: ExtractedQuestion): ImgRef[] {
+  // 选项 placeholder → 选项 label 的反查表
+  const optionPlaceholders = new Map<string, string>();
+  for (const o of q.options) {
+    if (o.image_ref) optionPlaceholders.set(o.image_ref, o.label);
+  }
+  const refs: ImgRef[] = [];
+  for (const span of q.tex_spans) {
+    if (span.image_idx == null) continue;
+    const url = q.images[span.image_idx];
+    if (!url) continue;
+    const optLabel = optionPlaceholders.get(span.placeholder);
+    refs.push({
+      url,
+      role: optLabel ? 'option' : 'stem',
+      label: optLabel,
+    });
+  }
+  return refs;
 }
 
 /** 按题型派发到正确的 fill handler */

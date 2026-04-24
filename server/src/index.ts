@@ -11,6 +11,7 @@ import otaRoute from './routes/ota';
 import adminPendingRoute from './routes/admin/pending';
 import adminSubmitRoute from './routes/admin/submit';
 import adminUnbindRoute from './routes/admin/unbind-device';
+import adminImageRoute from './routes/admin/image';
 import type { D1LikeDatabase } from './lib/db-sqlite-adapter';
 
 /**
@@ -74,6 +75,7 @@ app.route('/ota', otaRoute);
 app.route('/admin/pending', adminPendingRoute);
 app.route('/admin/submit', adminSubmitRoute);
 app.route('/admin/unbind-device', adminUnbindRoute);
+app.route('/admin/image', adminImageRoute);
 
 // 404
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'No such route' } }, 404));

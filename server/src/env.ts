@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Env } from './index.js';
 import { createSqliteAdapter } from './lib/db-sqlite-adapter.js';
+import { asR2Like, createDiskStorage, defaultStoragePath } from './lib/disk-storage.js';
 
 export interface EnvOverrides {
   JWT_SECRET?: string;
@@ -42,10 +43,19 @@ export function createEnv(overrides: EnvOverrides = {}): RuntimeEnv {
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
 
+  // 本地盘 fallback：DISK_STORAGE_PATH 设了 OR 默认 ./storage 都启用，
+  // 让 routes/answer.ts 的 composite_image_b64 有处可存（数学题闭环依赖）。
+  // 设 DISK_STORAGE_PATH=__disabled__ 显式关掉。
+  const diskStoragePath = process.env.DISK_STORAGE_PATH ?? defaultStoragePath();
+  const storage =
+    diskStoragePath === '__disabled__'
+      ? undefined
+      : (asR2Like(createDiskStorage(diskStoragePath)) as unknown as Env['STORAGE']);
+
   return {
     DB: createSqliteAdapter(sqlite) as unknown as Env['DB'],
-    STORAGE: undefined, // Phase 0 不用 R2，也不用 fs-bucket
-    STORAGE_PUBLIC_BASE: undefined,
+    STORAGE: storage,
+    STORAGE_PUBLIC_BASE: process.env.STORAGE_PUBLIC_BASE,
     JWT_SECRET,
     ADMIN_KEY,
     PROTOCOL_VERSION,

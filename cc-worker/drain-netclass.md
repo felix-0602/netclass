@@ -56,14 +56,22 @@ jq '.items | length' /tmp/netclass-pending.json
 
 对 `items` 里每个 `item`：
 
-1. **若有图片，先下载**（R2 公共 URL，无 referer 限制）：
+1. **若 item 有 `image_key`（即客户端上传过合成公式图）**，从服务端拉图：
    ```bash
-   [ -n "$IMG_URL" ] && curl -sS -o /tmp/nc-q-${ID}.png "$IMG_URL"
+   # 注意：image_key 形如 "stitched/<hash>.png"，取 hash 部分调 /admin/image/:hash
+   IMG_HASH=$(echo "$ITEM" | jq -r '.image_key // empty' | sed 's|stitched/||;s|\.png$||')
+   if [ -n "$IMG_HASH" ]; then
+     curl -sS -H "X-Admin-Key: $NETCLASS_ADMIN_KEY" \
+          -o /tmp/nc-q-${ID}.png \
+          "$NETCLASS_SERVER/admin/image/$IMG_HASH"
+   fi
    ```
+   若 R2 启用 + STORAGE_PUBLIC_BASE 配置过，也可以走公共 URL；
+   Phase 0 默认走 `/admin/image` 端点（本地盘 fallback）。
 
 2. **Read 题目信息**：
    - 从 `/tmp/netclass-pending.json` 拿到 text、options、tex_spans
-   - 若下载了 `composite_image_url`，Read `/tmp/nc-q-${ID}.png` 作为 vision 输入
+   - 若下载了图，Read `/tmp/nc-q-${ID}.png` 作为 vision 输入（数学公式题必须要图，否则 confidence < 0.7，跳过提交）
 
 3. **推理答案**：
    - 单选：找正确字母

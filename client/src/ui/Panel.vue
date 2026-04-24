@@ -71,6 +71,20 @@
         <button @click="$emit('open-settings')">设置</button>
       </div>
       <div class="ns-actions">
+        <button
+          v-if="!courseRunning"
+          class="ns-btn--primary"
+          :disabled="!session"
+          @click="onStartCourse"
+          :title="!session ? '请先激活卡密' : '从当前章节开始，自动走完本门课所有任务点'"
+        >
+          🚀 全课代戉
+        </button>
+        <button v-else class="ns-btn--danger" @click="onStopCourse">
+          ⏹ 停止全课（已过 {{ courseChaptersHandled }} 节）
+        </button>
+      </div>
+      <div class="ns-actions">
         <button v-if="!session" class="ns-btn--primary" @click="openActivate">激活卡密</button>
         <template v-else>
           <button @click="openActivate">换卡密</button>
@@ -143,8 +157,11 @@ import {
 import {
   runtimeState,
   requestManualScan,
+  requestStartCourse,
+  requestStopCourse,
   setAutomationEnabled,
 } from '@/runtime/state';
+import { courseProgress } from '@/runtime/course-runner';
 
 defineProps<{
   platform: string | null;
@@ -195,8 +212,8 @@ const dotKind = computed<'on' | 'off' | 'err' | 'work'>(() => {
 
 const pillLabel = computed(() => {
   if (runtimeState.status === 'error') return '出错';
+  if (courseRunning.value) return `🚀 ${courseChaptersHandled.value} 节`;
   if (runtimeState.status === 'working') {
-    // 工作中显进度（X/Y）或阶段或消息
     if (runtimeState.detected > 0) {
       return `${runtimeState.answered}/${runtimeState.detected}`;
     }
@@ -207,6 +224,16 @@ const pillLabel = computed(() => {
     ? truncate(runtimeState.message, 12)
     : (typeof window !== 'undefined' && window.location?.hostname?.split('.').slice(-2).join('.')) || 'ready';
 });
+
+// course runner 状态（响应式 polling 一秒一次，避免 courseProgress 不是 reactive）
+const courseRunning = ref(courseProgress.active);
+const courseChaptersHandled = ref(courseProgress.chaptersHandled);
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    courseRunning.value = courseProgress.active;
+    courseChaptersHandled.value = courseProgress.chaptersHandled;
+  }, 1000);
+}
 
 // dialog
 const dialogOpen = ref(false);
@@ -262,6 +289,19 @@ function onManualScan() {
 
 function onToggleAutomation() {
   setAutomationEnabled(!runtimeState.automationEnabled);
+}
+
+function onStartCourse() {
+  // 启动前确保 automation 也开着
+  if (!runtimeState.automationEnabled) setAutomationEnabled(true);
+  requestStartCourse();
+  courseRunning.value = true;
+  courseChaptersHandled.value = 0;
+}
+
+function onStopCourse() {
+  requestStopCourse();
+  courseRunning.value = false;
 }
 
 // drag —— pill 和 panel 共用

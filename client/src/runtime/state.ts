@@ -18,6 +18,8 @@ export interface RuntimeState {
 export interface RuntimeActions {
   manualScan?: () => void;
   toggleAutomation?: (enabled: boolean) => void;
+  startCourse?: () => void;
+  stopCourse?: () => void;
 }
 
 export const runtimeState = reactive<RuntimeState>({
@@ -50,4 +52,12 @@ export function requestManualScan(): void {
 export function setAutomationEnabled(enabled: boolean): void {
   runtimeState.automationEnabled = enabled;
   actions.toggleAutomation?.(enabled);
+}
+
+export function requestStartCourse(): void {
+  actions.startCourse?.();
+}
+
+export function requestStopCourse(): void {
+  actions.stopCourse?.();
 }
