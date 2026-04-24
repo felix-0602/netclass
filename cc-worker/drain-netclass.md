@@ -1,6 +1,6 @@
 ---
-description: Drain pending netclass question queue via local Claude Code (no API fees)
-argument-hint: "[count=10] [--platform chaoxing|zhihuishu|unipus] [--type single|multi|judge|fill]"
+description: 用本地 Claude Code 消化 netclass-sidekick 题库队列（零 API 费）
+argument-hint: "[数量=10] [--platform chaoxing|zhihuishu|unipus] [--type single|multi|judge|fill]"
 allowed-tools:
   - Bash
   - Read
@@ -8,35 +8,34 @@ allowed-tools:
   - Grep
 ---
 
-# /drain-netclass — Process pending netclass-sidekick question queue
+# /drain-netclass — 消化 netclass-sidekick 题库 pending 队列
 
-You are acting as the answer-generation worker for the netclass-sidekick service.
-Each run pulls N pending questions from the server, answers them using your reasoning
-(with vision for image-based math questions), and submits the batch back.
+你现在是 netclass-sidekick 服务的答题 worker。每次运行从服务端拉 N 道待处理题，
+用你的推理能力（数学题配合 vision 看合成图）答完，批量回写。
 
-## Arguments
+## 参数
 
-$ARGUMENTS — usually just a count like `10`. Also accepts `--platform X` / `--type Y`.
+`$ARGUMENTS` — 通常一个数字比如 `10`。也支持 `--platform X` / `--type Y` 过滤。
 
-Default `count=10` if not specified.
+默认 `count=10`。
 
-## Environment
+## 环境
 
-Credentials live in `~/.netclass-drain.env`:
+凭据存在 `~/.netclass-drain.env`：
 ```bash
-NETCLASS_SERVER=https://netclass-sidekick.<account>.workers.dev
+NETCLASS_SERVER=https://netclass-sidekick.<账户>.workers.dev
 NETCLASS_ADMIN_KEY=<X-Admin-Key>
 ```
 
-If the env file doesn't exist, STOP and tell the user:
-> Missing `~/.netclass-drain.env`. Run `./cc-worker/install.sh` from the project root to set it up.
+如果 env 文件不存在，停下并告诉用户：
+> 找不到 `~/.netclass-drain.env`。在项目根目录跑 `./cc-worker/install.sh` 初始化。
 
-## Workflow
+## 工作流
 
-### Step 1 — Pull pending queue
+### 步骤 1 — 拉取 pending 队列
 
-Parse `$ARGUMENTS` into `COUNT` (default 10) and optional filters (`--platform`, `--type`).
-Always load env first so both `NETCLASS_SERVER` and `NETCLASS_ADMIN_KEY` are in scope for every subsequent curl.
+把 `$ARGUMENTS` 解析为 `COUNT`（默认 10）+ 可选过滤（`--platform`、`--type`）。
+**先加载 env**，这样 `NETCLASS_SERVER` 和 `NETCLASS_ADMIN_KEY` 对后续每个 curl 都可见。
 
 ```bash
 set -a && source ~/.netclass-drain.env && set +a
@@ -44,48 +43,48 @@ curl -sS -H "X-Admin-Key: $NETCLASS_ADMIN_KEY" \
      "$NETCLASS_SERVER/admin/pending?limit=${COUNT:-10}" \
      > /tmp/netclass-pending.json
 
-# Sanity check
+# 校验
 jq '.items | length' /tmp/netclass-pending.json
 ```
 
-Read `/tmp/netclass-pending.json`. If `items` is empty, print "Queue empty, nothing to drain." and exit.
+用 Read 读 `/tmp/netclass-pending.json`。如果 `items` 为空，打印"队列空，无事可做"并退出。
 
-### Step 2 — Process each pending item
+### 步骤 2 — 逐条处理
 
-For each `item` in `items`:
+对 `items` 里每个 `item`：
 
-1. **Download image if present** (R2 public URL, no referer needed):
+1. **若有图片，先下载**（R2 公共 URL，无 referer 限制）：
    ```bash
    [ -n "$IMG_URL" ] && curl -sS -o /tmp/nc-q-${ID}.png "$IMG_URL"
    ```
 
-2. **Read the item**:
-   - Read `/tmp/netclass-pending.json` to get the item's text, options, tex_spans
-   - If `composite_image_url` was downloaded, Read `/tmp/nc-q-${ID}.png` for vision input
+2. **Read 题目信息**：
+   - 从 `/tmp/netclass-pending.json` 拿到 text、options、tex_spans
+   - 若下载了 `composite_image_url`，Read `/tmp/nc-q-${ID}.png` 作为 vision 输入
 
-3. **Reason about the answer**:
-   - Single-choice: identify correct letter
-   - Multi-choice: identify all correct letters
-   - Judge: true/false
-   - Fill-in: provide exact expected text
-   - If you cannot determine with confidence ≥ 0.7, mark it uncertain and include reasoning in `note`
+3. **推理答案**：
+   - 单选：找正确字母
+   - 多选：找所有正确字母
+   - 判断题：true / false
+   - 填空：给出准确答案文本
+   - 若把握不到 ≥ 0.7，**不提交**，标记 uncertain 并在 `note` 写原因
 
-4. **Emit a JSON entry**:
+4. **构造 JSON 条目**：
    ```json
    {
      "id": "<hash>",
      "answer": {"value": "D", "raw": ["D"]},
      "confidence": 0.95,
      "source": "cc_drain",
-     "note": "Given y(0)=1, C=1, so particular solution is y=x²+1 → D"
+     "note": "代入 y(0)=1 得 C=1，特解 y=x²+1 → D"
    }
    ```
 
-Collect all entries into a single array.
+汇总成一个数组。
 
-### Step 3 — Submit batch
+### 步骤 3 — 批量提交
 
-Write the array to `/tmp/netclass-answers.json` using the Write tool, then POST:
+用 Write 工具把数组写进 `/tmp/netclass-answers.json`，然后 POST：
 
 ```bash
 curl -sS -X POST \
@@ -95,37 +94,37 @@ curl -sS -X POST \
      "$NETCLASS_SERVER/admin/submit"
 ```
 
-### Step 4 — Summary report
+### 步骤 4 — 汇报
 
-Display to the user:
+展示给用户：
 
 ```
-Drain complete — 10 questions processed in 2m 34s
-  ✓ Accepted:  8  (written to D1 questions table)
-  ⚠ Uncertain: 1  (confidence < 0.7, kept in pending for re-review)
-  ✗ Rejected:  1  (already answered by someone else)
+drain 完成 — 10 题耗时 2 分 34 秒
+  ✓ 已入库：8   （写入 D1 questions 表）
+  ⚠ 不确定：1   （置信度 < 0.7，保留在 pending 等复审）
+  ✗ 已拒绝：1   （已被其他人回答过）
 ```
 
-List the uncertain/rejected items with their IDs and notes.
+列出 uncertain / rejected 条目的 ID + 备注。
 
-### Step 5 — Cleanup
+### 步骤 5 — 清理
 
 ```bash
 rm -f /tmp/netclass-pending.json /tmp/netclass-answers.json /tmp/nc-q-*.png
 ```
 
-## Rules
+## 规则
 
-1. **Never submit an answer with confidence < 0.7** — flag it uncertain instead. Quality > throughput.
-2. **If the question is ambiguous** (e.g., "describe your thoughts on X" — an essay question), skip with `note: "essay, needs manual review"`.
-3. **If image download fails** (R2 403 or network), skip and note the reason. Don't guess without the image.
-4. **Stop batch early** if > 3 consecutive items fail — server or queue is likely broken.
-5. **Never modify the original pending queue** via SQL — only via `/admin/submit` API.
-6. **Do not run autonomously on cron** — this command is always manually invoked.
+1. **置信度 < 0.7 绝不提交** — 标记 uncertain 即可。质量优先于吞吐。
+2. **题目模糊**（如"谈谈你对 X 的看法"这种主观题），跳过并 `note: "主观题，需人工复审"`。
+3. **图片下载失败**（R2 403 或网络问题），跳过并记录原因。**没图别硬答**。
+4. **连续 3 条失败**就停整批 — 服务端或队列可能挂了。
+5. **只通过 `/admin/submit` API 回写**，绝不手写 SQL 改 pending 队列。
+6. **绝不放 cron 里自动跑** — 本命令必须手动触发。
 
-## Troubleshooting
+## 故障排查
 
-- `401 admin_required` — Admin key stale. `wrangler secret put ADMIN_KEY` on server, update env file.
-- `503 on /admin/pending` — Server/D1 down. Check `wrangler tail`.
-- `Read` cannot open PNG — `curl` returned HTML error page. Check R2 bucket public.
-- Vision unclear on formula — composite image rendering bug in client. File a bug against `client/src/vision/compose.ts`.
+- `401 admin_required` — Admin key 过时。服务端跑 `wrangler secret put ADMIN_KEY`，同步更新 env 文件。
+- `/admin/pending` 返回 503 — 服务端 / D1 挂了。看 `wrangler tail` 日志。
+- Read 读 PNG 失败 — curl 拉到了 HTML 错误页。检查 R2 bucket 是否已开公共读。
+- Vision 看公式模糊 — 客户端 vision/compose 合图 bug。提 issue 指向 `client/src/vision/compose.ts`。

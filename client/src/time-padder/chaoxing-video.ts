@@ -1,66 +1,108 @@
-// 超星视频自动播放 + 心跳上报（刷时长功能核心）
-// Phase 0 Week 1 实装；骨架迁移自原 app.js 视频控制区块
+// 超星视频自动播放（刷时长核心）
+// 实现参考：app.js:5343-5370 processMedia
 //
-// 关键行为：
-//  - muted 播放（避免打扰用户）
-//  - playbackRate 可配置（默认 1.5x，上限 2x，加 ±0.1 jitter 防检测）
-//  - visibilitychange 切到后台时不暂停计时（平台侧统计若挂起会重置）
-//  - 心跳 POST：平台有自己的进度上报 API（需要抓原 app.js 现有 log endpoint）
+// 核心观察（从原脚本 + 侦察得出）：
+//   超星自己维护进度统计，基于 <video> 的 play/pause/ended 事件 + ananas 模块内部监听。
+//   脚本不需要自己发心跳请求——只要**保持视频在播**，超星后端自然会累计时长。
+//   我们要做的：
+//     1. muted 播放（不打扰用户）
+//     2. playbackRate 设置（默认 1.5x，加随机 jitter 反检测）
+//     3. 监听 pause 事件 → 3 秒后自动恢复（覆盖用户误点）
+//     4. 监听 ended 事件 → 通知外部，由 task 层跳下一任务点
+//
+// 关键合规点：不加速到超星未许可的倍速（2x 是平台上限，再高会被审计）
 
-interface VideoPadderOptions {
+export interface VideoPadderOptions {
+  /** 播放倍速，默认 1.5x；实际生效会加 ±0.1 jitter */
   playbackRate?: number;
+  /** 静音播放（默认 true） */
   mute?: boolean;
+  /** 视频结束时的回调（例如触发任务跳转） */
+  onEnded?: (video: HTMLVideoElement) => void;
+  /** 暂停后重播延迟（秒），默认 3，原脚本的实测值 */
+  resumeDelaySec?: number;
 }
 
-export function startChaoxingVideoPadder(opts: VideoPadderOptions = {}) {
-  const { playbackRate = 1.5, mute = true } = opts;
+/**
+ * 控制一个 <video>（或 <audio>）节点：挂上 autoplay + resume + ended hooks。
+ * 返回一个清理函数，用于解绑所有监听。
+ */
+export function attachVideoPadder(
+  el: HTMLVideoElement | HTMLAudioElement,
+  opts: VideoPadderOptions = {},
+): () => void {
+  const { playbackRate = 1.5, mute = true, onEnded, resumeDelaySec = 3 } = opts;
 
-  const videos = document.querySelectorAll('video');
-  if (videos.length === 0) {
-    // 视频 iframe 可能跟主 document 分开，后续 adapter 会传入 iframe doc
-    return;
-  }
+  if (mute) el.muted = true;
 
-  videos.forEach((v) => attachPadder(v, playbackRate, mute));
-}
+  // 反"整齐 1.5x" 特征：加 ±0.1 jitter
+  const jittered = playbackRate + (Math.random() - 0.5) * 0.2;
+  el.playbackRate = Math.min(2, Math.max(0.5, jittered));
 
-function attachPadder(v: HTMLVideoElement, rate: number, mute: boolean) {
-  if (mute) v.muted = true;
-  // 用 random jitter 防"整齐 1.5x" 特征
-  const jittered = rate + (Math.random() - 0.5) * 0.2;
-  v.playbackRate = Math.min(2, Math.max(0.5, jittered));
+  const tryPlay = (): void => {
+    el.play().catch(() => {
+      // 受 autoplay policy 拦截时，等用户首次点击页面触发
+      const once = (): void => {
+        void el.play();
+        document.removeEventListener('click', once);
+      };
+      document.addEventListener('click', once, { once: true });
+    });
+  };
 
-  // 自动播放
-  const tryPlay = () => v.play().catch(() => {
-    // 若被 autoplay policy 拦，等用户首次点击再试
-    const once = () => {
-      v.play();
-      document.removeEventListener('click', once);
-    };
-    document.addEventListener('click', once, { once: true });
-  });
+  // 3 秒内重复 pause → play（覆盖用户手滑 + 覆盖超星某些挂起逻辑）
+  let pauseTimer: ReturnType<typeof setTimeout> | null = null;
+  const onPause = (): void => {
+    if (el.ended) return; // 正常结束
+    if (pauseTimer) clearTimeout(pauseTimer);
+    pauseTimer = setTimeout(() => void el.play(), resumeDelaySec * 1000);
+  };
+
+  const onEndedInternal = (): void => {
+    if (pauseTimer) {
+      clearTimeout(pauseTimer);
+      pauseTimer = null;
+    }
+    // eslint-disable-next-line no-console
+    console.info(
+      `[netclass-sidekick/chaoxing-video] ${el.tagName.toLowerCase()} 播放完成，时长累计完成`,
+    );
+    onEnded?.(el as HTMLVideoElement);
+  };
+
+  el.addEventListener('pause', onPause);
+  el.addEventListener('ended', onEndedInternal);
+
   tryPlay();
 
-  // document-hidden 时浏览器会 throttle setInterval，用 video.addEventListener('timeupdate')
-  // 作为心跳源（即便 tab 隐藏，超星 video 仍在播，timeupdate 仍会触发）
-  let lastReport = 0;
-  v.addEventListener('timeupdate', () => {
-    const now = Date.now();
-    if (now - lastReport < 5_000) return;
-    lastReport = now;
-    reportHeartbeat(v);
-  });
-
-  // 视频结束 → TODO: 自动跳下一节任务点（chaoxing-task.ts，Phase 0 Week 1）
-  v.addEventListener('ended', () => {
-    console.info('[netclass-sidekick/chaoxing] video ended, jump next task TODO');
-  });
+  // 清理函数
+  return () => {
+    el.removeEventListener('pause', onPause);
+    el.removeEventListener('ended', onEndedInternal);
+    if (pauseTimer) clearTimeout(pauseTimer);
+  };
 }
 
-function reportHeartbeat(_v: HTMLVideoElement) {
-  // Phase 0 Week 1 TODO：
-  // 参考原 app.js 里的 /log 上报接口（需要传 clazzId, courseId, otherInfo, duration 等）
-  // 超星会根据这个心跳判定观看进度
-  // 这里先占位：
-  // GM_xmlhttpRequest({ url: ..., method: 'POST', data: JSON.stringify({...}) });
+/**
+ * 扫 document 里所有 <video> / <audio> 并挂上 padder。
+ * 返回清理函数，解绑所有挂载。
+ */
+export function startChaoxingMediaPadders(
+  doc: Document = document,
+  opts: VideoPadderOptions = {},
+): () => void {
+  const elements = doc.querySelectorAll<HTMLVideoElement | HTMLAudioElement>('video, audio');
+  const cleanups: Array<() => void> = [];
+  elements.forEach((el) => {
+    cleanups.push(attachVideoPadder(el, opts));
+  });
+  return () => cleanups.forEach((fn) => fn());
+}
+
+/**
+ * 旧接口保留：Phase 0 Week 1 规划里的 startChaoxingVideoPadder()
+ * 使用默认选项，扫主 document。
+ */
+export function startChaoxingVideoPadder(opts: VideoPadderOptions = {}): () => void {
+  return startChaoxingMediaPadders(document, opts);
 }

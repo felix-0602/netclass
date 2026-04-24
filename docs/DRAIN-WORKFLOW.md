@@ -81,66 +81,66 @@ chmod 600 ~/.netclass-drain.env
 
 ```markdown
 ---
-description: Drain pending netclass question queue via local Claude Code
+description: 用本地 Claude Code 消化 netclass 题库队列
 allowed-tools:
   - Bash
   - Read
   - Write
 ---
 
-# Drain Netclass Question Queue
+# 消化 Netclass 题库队列
 
-Process $ARGUMENTS pending questions from the netclass-sidekick server.
+处理 $ARGUMENTS 道来自 netclass-sidekick 服务端的 pending 题。
 
-Usage: `/drain-netclass [count=10] [--platform X] [--type Y]`
+用法：`/drain-netclass [数量=10] [--platform X] [--type Y]`
 
-## Step 1 — Load env + pull queue
+## 步骤 1 — 加载 env + 拉队列
 
-Load env:
+加载 env：
 !`source ~/.netclass-drain.env`
 
-Pull N pending items:
+拉 N 条 pending：
 !`curl -s -H "X-Admin-Key: $NETCLASS_ADMIN_KEY" \
       "$NETCLASS_SERVER/admin/pending?limit=$ARGUMENTS" \
       > /tmp/netclass-pending.json`
 
-Read the queue:
+读队列：
 → Read /tmp/netclass-pending.json
 
-## Step 2 — For each pending question
+## 步骤 2 — 逐条答题
 
-(You, Claude, do this)
+（你 Claude 来做）
 
-For each item in `items`:
-  - If `composite_image_url` is present:
+对 `items` 里每个 item：
+  - 若有 `composite_image_url`：
     !`curl -s -o /tmp/netclass-q-{id}.png "{composite_image_url}"`
     → Read /tmp/netclass-q-{id}.png
-  - Based on `text`, `options`, and the image (if any), determine the correct answer.
-  - Assign a confidence score (0.0 - 1.0). Below 0.7 → mark uncertain.
-  - Write a one-line `note` explaining your reasoning.
+  - 基于 `text`、`options` 和图片（如有）判断正确答案。
+  - 打 0.0-1.0 的 confidence。低于 0.7 → 标 uncertain。
+  - 用一行 `note` 写推理过程。
 
-Collect all answers into a single JSON array.
+汇总成一个 JSON 数组。
 
-## Step 3 — Submit batch
+## 步骤 3 — 批量提交
 
-Write array to temp file:
-→ Write /tmp/netclass-answers.json with the batch
+把数组写到临时文件：
+→ Write /tmp/netclass-answers.json
 
-POST to admin:
+POST 到 admin：
 !`curl -s -X POST \
       -H "X-Admin-Key: $NETCLASS_ADMIN_KEY" \
       -H "Content-Type: application/json" \
       -d @/tmp/netclass-answers.json \
       "$NETCLASS_SERVER/admin/submit"`
 
-## Step 4 — Summary
+## 步骤 4 — 汇总
 
-Print:
-  - Total processed
-  - Accepted (D1 insertion succeeded)
-  - Rejected (with reasons)
-  - Uncertain (confidence < 0.7, will need re-review)
-  - Elapsed time
+打印：
+  - 总处理数
+  - 已入库（D1 插入成功）
+  - 已拒绝（带原因）
+  - 不确定（confidence < 0.7，需复审）
+  - 耗时
 ```
 
 ## 4. CC Read 工具对图片的支持
