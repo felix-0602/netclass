@@ -15,5 +15,7 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     globals: true,
+    // Playwright e2e 用 @playwright/test 单独跑（npm run test:e2e），不要被 vitest 拉走
+    exclude: ['node_modules/**', 'test/e2e/**'],
   },
 });

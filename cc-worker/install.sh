@@ -31,9 +31,11 @@ ENV_FILE="$HOME/.netclass-drain.env"
 if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<'EOF'
 # netclass-sidekick drain 凭据
-# 服务端部署完毕后把下面两行填上
+# Phase 0 生产服务端：腾讯云轻量 Node 部署在 http://182.254.180.181:8080
+# ADMIN_KEY 由 deploy/scripts/init.sh 生成一次后打印到 SSH 控制台 ——
+# 务必保存到密码管理器，不要提交到仓库。
 
-NETCLASS_SERVER=https://netclass-sidekick.example.workers.dev
+NETCLASS_SERVER=http://182.254.180.181:8080
 NETCLASS_ADMIN_KEY=change-me
 EOF
   chmod 600 "$ENV_FILE"

@@ -23,9 +23,12 @@ allowed-tools:
 
 凭据存在 `~/.netclass-drain.env`：
 ```bash
-NETCLASS_SERVER=https://netclass-sidekick.<账户>.workers.dev
+NETCLASS_SERVER=http://182.254.180.181:8080
 NETCLASS_ADMIN_KEY=<X-Admin-Key>
 ```
+
+Phase 0 服务端：腾讯云轻量 Node + Hono + better-sqlite3（commit cde7115 迁移）。
+`ADMIN_KEY` 由 `deploy/scripts/init.sh` 首次部署时生成并打印到 SSH 控制台一次。
 
 如果 env 文件不存在，停下并告诉用户：
 > 找不到 `~/.netclass-drain.env`。在项目根目录跑 `./cc-worker/install.sh` 初始化。
@@ -124,7 +127,8 @@ rm -f /tmp/netclass-pending.json /tmp/netclass-answers.json /tmp/nc-q-*.png
 
 ## 故障排查
 
-- `401 admin_required` — Admin key 过时。服务端跑 `wrangler secret put ADMIN_KEY`，同步更新 env 文件。
-- `/admin/pending` 返回 503 — 服务端 / D1 挂了。看 `wrangler tail` 日志。
-- Read 读 PNG 失败 — curl 拉到了 HTML 错误页。检查 R2 bucket 是否已开公共读。
+- `401 admin_required` — Admin key 过时或拼错。SSH 上服务端：编辑 `/opt/netclass/server/.env` 的 `ADMIN_KEY=...`，跑 `sudo systemctl restart netclass`。同步更新 `~/.netclass-drain.env`。
+- `/admin/pending` 返回 503 或连接拒绝 — 服务端挂了。SSH 看日志：`sudo journalctl -u netclass -n 100 --no-pager`。
+- `curl: (7) Failed to connect` — IP 变了 / 防火墙拦了 / 腾讯云安全组改了。腾讯云控制台确认 8080 端口对 0.0.0.0/0 开放。
+- Read 读 PNG 失败 — 服务端 STORAGE 未启用（Phase 0 R2 可选，Node 本地盘 fallback 待 Phase 1 接入）。当前 Phase 0 纯文本题能答，数学题需等 R2 或本地盘落地。
 - Vision 看公式模糊 — 客户端 vision/compose 合图 bug。提 issue 指向 `client/src/vision/compose.ts`。

@@ -5,6 +5,7 @@
 //   - app.js:5032 getAnswer（原脚本的接入点，本 adapter 的上游）
 
 import { decryptDocument } from '../decode/cxsecret';
+import { applyAntiBackground } from '../runtime/anti-background';
 import { jumpNextChaoxingTask } from '../time-padder/chaoxing-task';
 import { startChaoxingMediaPadders } from '../time-padder/chaoxing-video';
 import type { ExtractedQuestion, QuestionOption, QuestionType, TexSpan } from './types';
@@ -39,6 +40,9 @@ export function bootChaoxing(rootDoc: Document = document): () => void {
 
   for (const d of docs) {
     if (!isDocument(d)) continue;
+
+    // 反"切到后台 / 鼠标不在视频"检测：每个同源 doc 都跑一次
+    cleanups.push(applyAntiBackground(d));
 
     const cleanup = startChaoxingMediaPadders(d, {
       onEnded: () => {

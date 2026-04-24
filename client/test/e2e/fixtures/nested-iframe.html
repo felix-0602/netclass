@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>Netclass Sidekick — Nested iframe dedup fixture</title>
+  <style>
+    body { font-family: system-ui; padding: 12px; }
+    iframe { width: 90%; height: 180px; border: 1px solid #ccc; margin-top: 8px; }
+    .mark { padding: 4px 8px; background: #1f71e0; color: #fff; display: inline-block; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1 id="frame-title">Frame</h1>
+  <p>url: <span id="url"></span></p>
+  <p>self === top: <span id="is-top"></span></p>
+  <div id="mount-slot"></div>
+  <div id="children"></div>
+
+  <script>
+    // 测试用的顶层 frame 守卫逻辑 —— 故意重写了一遍 mount.ts 的核心契约，
+    // 这样哪天 mount.ts 改坏了，这个测试能立刻告警。
+    //
+    // 契约：
+    //   1. 只有 window.self === window.top 的 frame 才"挂 Panel"（这里用 marker div 模拟）
+    //   2. 同一 frame 内即使脚本被 userscript 引擎重复注入，也只挂一次（HOST_ID 去重）
+    //   3. 若 window.top 跨域访问抛错，视为非顶层，不挂
+
+    const HOST_ID = 'netclass-sidekick-host';
+
+    function isTopFrame() {
+      try {
+        return window.self === window.top;
+      } catch {
+        return false;
+      }
+    }
+
+    function maybeMountPanel() {
+      // 同 frame 内重复注入防护
+      if (document.getElementById(HOST_ID)) return 'skip-already-mounted';
+      // 跨 frame 防护
+      if (!isTopFrame()) return 'skip-not-top';
+
+      const host = document.createElement('div');
+      host.id = HOST_ID;
+      host.className = 'mark';
+      host.textContent = '🥇 Mounted';
+      document.getElementById('mount-slot').appendChild(host);
+      return 'mounted';
+    }
+
+    // 把调试信息贴到页面上（便于 Playwright 读）
+    document.getElementById('url').textContent = location.href.split('/').pop();
+    const isTop = isTopFrame();
+    document.getElementById('is-top').textContent = String(isTop);
+    document.getElementById('frame-title').textContent = isTop ? 'TOP FRAME' : 'CHILD FRAME';
+
+    // 模拟真实场景：userscript 可能在同 frame 跑两次（Tampermonkey 某些情况下）
+    const r1 = maybeMountPanel();
+    const r2 = maybeMountPanel();
+    window.__netclassMountResults = [r1, r2];
+
+    // 递归加自己，制造嵌套
+    const depthParam = new URLSearchParams(location.search).get('depth');
+    const currentDepth = depthParam ? parseInt(depthParam, 10) : 0;
+    const maxDepth = 3;
+    if (currentDepth < maxDepth) {
+      const iframe = document.createElement('iframe');
+      // 同源同文件，不同 depth → 模拟超星 1-4 层嵌套
+      iframe.src = `nested-iframe.html?depth=${currentDepth + 1}`;
+      document.getElementById('children').appendChild(iframe);
+    }
+  </script>
+</body>
+</html>

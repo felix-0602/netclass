@@ -49,8 +49,13 @@ export default defineConfig({
         ],
         'run-at': 'document-start',
         // 合规披露（参考原 app.js）
+        // vite-plugin-monkey v5 期望对象数组：{ type, description, tag? }
         antifeature: [
-          ['cheating', '提供超星/知到/U 校园的自动刷课与题库答题辅助。请依学校学术诚信规定使用。'],
+          {
+            type: 'cheating',
+            description:
+              '提供超星/知到/U 校园的自动刷课与题库答题辅助。请依学校学术诚信规定使用。',
+          },
         ],
       },
       build: {

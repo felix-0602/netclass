@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>Mock chaoxing 作业页</title>
+</head>
+<body>
+  <h2>章节测验（模拟）</h2>
+
+  <!-- 单选：答案应是 "2"（A） -->
+  <div class="TiMu">
+    <div class="Zy_TItle">
+      <div class="font-cxsecret fontLabel">1+1 等于几？</div>
+    </div>
+    <input type="hidden" name="answer1001" value="" />
+    <input type="hidden" name="answertype1001" value="0" />
+    <ul class="Zy_ulTop">
+      <li data-v="a"><span class="num_option">A</span><span class="after">2</span></li>
+      <li data-v="b"><span class="num_option">B</span><span class="after">3</span></li>
+      <li data-v="c"><span class="num_option">C</span><span class="after">4</span></li>
+      <li data-v="d"><span class="num_option">D</span><span class="after">5</span></li>
+    </ul>
+  </div>
+
+  <!-- 判断：答案应是 "正确" -->
+  <div class="TiMu">
+    <div class="Zy_TItle">
+      <div class="font-cxsecret fontLabel">天是蓝的？</div>
+    </div>
+    <input type="hidden" name="answer1002" value="" />
+    <input type="hidden" name="answertype1002" value="3" />
+    <ul class="Zy_ulTop">
+      <li aria-label="对选择"><span class="num_option">A</span><span class="after">对</span></li>
+      <li aria-label="错选择"><span class="num_option">B</span><span class="after">错</span></li>
+    </ul>
+  </div>
+
+  <!-- 多选：答案应是 ["红","蓝"]（A+C） -->
+  <div class="TiMu">
+    <div class="Zy_TItle">
+      <div class="font-cxsecret fontLabel">原色有哪些？</div>
+    </div>
+    <input type="hidden" name="answer1003" value="" />
+    <input type="hidden" name="answertype1003" value="1" />
+    <ul class="Zy_ulTop">
+      <li><span class="num_option">A</span><span class="after">红</span></li>
+      <li><span class="num_option">B</span><span class="after">粉</span></li>
+      <li><span class="num_option">C</span><span class="after">蓝</span></li>
+      <li><span class="num_option">D</span><span class="after">紫</span></li>
+    </ul>
+  </div>
+
+  <!-- 点击 li 模拟 chaoxing 的勾选行为：设置 aria-checked="true" -->
+  <script>
+    document.querySelectorAll('.Zy_ulTop li').forEach((li) => {
+      li.addEventListener('click', () => {
+        li.setAttribute('aria-checked', 'true');
+      });
+    });
+  </script>
+</body>
+</html>

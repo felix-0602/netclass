@@ -10,25 +10,41 @@
 
 ### 任务（按周）
 
-#### Week 1 — 客户端骨架
+#### Week 1 — 客户端骨架 ✅ 完成
 - `client/` Vite + vite-plugin-monkey 脚手架出 hello-world
 - `adapters/chaoxing.ts` 从 `app.js:5032 getAnswer` 区迁移 TiMu 提取
 - `decode/cxsecret.ts` 从 `app.js` `@resource ttf` 逻辑抽离，单元测试
 - `time-padder/chaoxing-video.ts` 复用 `app.js` 视频自动播放 + 心跳
 - Playwright `extract-chaoxing.spec.ts` 用 `test/fixtures/` 跑 regression
 
-#### Week 2 — 服务端骨架 + 复用率探针
-- `server/` Workers + Hono + D1 出 `/healthz` + schema 建表
-- `/answer` happy path：miss → 写 pending → 返回 pending 状态
-- `/auth` 卡密换 JWT（5 张硬编码种子卡密）
-- `cc-worker/drain-netclass.md` 最小版：curl pending → 打印（未答题）
-- **复用率探针**（关键）：3 舍友同门课跑 1 周（或手工模拟 200 题），统计题目 hash 跨账户命中率
+#### Week 2 — 服务端骨架 + 复用率探针 ✅ 完成（架构调整：迁离 Workers）
+- ~~`server/` Workers + Hono + D1~~ → 改 **Node + Hono + better-sqlite3**（commit cde7115）+ 部署 `http://182.254.180.181:8080`
+- `/answer` happy path、`/auth` 卡密换 JWT、`/contribute`、`/admin/{pending,submit}`、`/ota`
+- `cc-worker/drain-netclass.md` + `install.sh` 在仓
+- 复用率探针推迟到 Week 3 实装（`server/scripts/reuse-rate.ts` 已落，等真用户数据填充）
 
-#### Week 3 — Vision 合图 + 门槛验证
-- `client/src/vision/compose.ts` — Canvas N 图合 1 PNG，base64 上传
-- `drain-netclass.md` 完整版：Read 合成图 → 答题 → 批量 submit
-- 手动跑一次完整 round-trip（client 遇新题 → 进 pending → drain → 下次命中）
-- 验证三门槛（见下）
+#### Week 3 — 自动答题闭环 + 服务端探针 + 装机指南 ✅ 完成（2026-04-24）
+> 详见 [CHANGELOG.md](./CHANGELOG.md) Phase 0 Week 3 节
+- `client/src/answer/filler.ts` 主编排 + `fill/{choice,blank,judge,essay}.ts` 4 种题型回填 + `similarity.ts` Levenshtein 兜底 + `hash.ts` 与服务端对齐
+- `client/src/runtime/{router,url-watcher,iframe-dispatch,anti-background}.ts` 自动监听 + 分派 + 反后台检测
+- `client/src/runtime/state.ts`（Codex 起骨架，已接 Panel.vue 显 phase/进度/自动开关）
+- Panel 改 Open Shadow DOM 隔离宿主 CSS
+- `server/scripts/{reuse-rate,leak-watch}.ts` Phase 0 门槛 #2/#3 测量地基
+- `cc-worker/drain-netclass.md` + `install.sh` 更新为 Node 服务端
+- `docs/INSTALL-ROOMMATE.md` 5-min 装机指南
+- E2E 回归：iframe-dedup（防"5 浮窗"）+ answer-loop（4 用例）；vitest 137 + e2e 7 + server 9 = **153 测试全绿**
+- `client/src/vision/compose.ts` 已存且可编译（math 闭环串联推迟到 Phase 1）
+
+**Phase 0 Week 3 退出待办（要做的事，不是代码）**：
+- [ ] 跑一次完整 round-trip 手测（自己装 → 进 chaoxing → 答 1 节非数学课 → drain → 下次命中）
+- [ ] 给 3 舍友发卡密 + INSTALL-ROOMMATE.md，让他们各跑 1 节课
+- [ ] 1 周后跑 `tsx server/scripts/reuse-rate.ts` 看 proxy 复用率
+- [ ] 投放 1-2 张 canary 题，3-5 天跑一次 `leak-watch list` 看是否泄漏
+
+**Week 3 已知技术债（已记 Phase 1 TODO）**：
+- bundle 788KB（table.json inline 致），改 `@resource` 远程加载可瘤减回 ~135KB
+- 数学题闭环未串：filler 没接 vision/compose，服务端 R2 禁用未接本地盘 fallback，drain 无图可读
+- `auth_events` / `inference_logs` 写入未实装（Phase 1 W1/W2）
 
 ### Phase 0 退出门槛（**全部**达成才进 Phase 1）
 
