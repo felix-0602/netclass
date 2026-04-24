@@ -1,0 +1,62 @@
+# dependencies
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# builds
+dist/
+build/
+*.user.js
+!client/dist/netclass-sidekick.user.js  # keep the built artifact if placed here
+
+# envs + secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+*.key
+*.pem
+
+# Cloudflare Wrangler
+.wrangler/
+wrangler.local.toml
+.mf/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# IDE
+.vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# logs + temp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.tmp/
+tmp/
+
+# recon imgs snapshot (local dev scratch, not sacred)
+recon-imgs/
+
+# coverage
+coverage/
+*.lcov
+
+# chaoxing uploads / drain scratch
+/tmp/netclass-*
+
+# gstack telemetry / session state (local only)
+.gstack/

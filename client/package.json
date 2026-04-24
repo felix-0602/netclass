@@ -1,0 +1,31 @@
+{
+  "name": "@netclass/client",
+  "version": "0.1.0-alpha",
+  "private": true,
+  "description": "Netclass Sidekick Tampermonkey userscript (client)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "element-plus": "^2.8.0",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.10.0",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "@vue/tsconfig": "^0.7.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-monkey": "^5.0.0",
+    "vitest": "^2.1.0",
+    "vue-tsc": "^2.2.0"
+  }
+}
