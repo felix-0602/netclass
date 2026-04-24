@@ -1,0 +1,45 @@
+[Unit]
+Description=Netclass Sidekick server (Node + Hono + SQLite)
+After=network.target
+# 如果有 network-online.target 要求：
+# After=network-online.target
+# Wants=network-online.target
+
+[Service]
+Type=simple
+# 运行用户：假设你在 VPS 上创建了一个非 root 用户 ubuntu
+User=ubuntu
+Group=ubuntu
+
+# 代码目录：假设 git clone 到 /home/ubuntu/netclass
+WorkingDirectory=/home/ubuntu/netclass/server
+
+# 环境变量：从 .env 文件加载（注意：Node 20.6+ 才支持 --env-file）
+# EnvironmentFile= 不直接支持 dotenv 格式里的 KEY=VALUE 行带引号，所以
+# 我们走 Node 原生 --env-file 参数
+Environment=NODE_ENV=production
+
+# 直接用 node --env-file=.env 启动 tsx 跑 src/server.ts
+# 这样不用预编译 TypeScript，省构建步骤
+ExecStart=/usr/bin/node --env-file=/home/ubuntu/netclass/server/.env /home/ubuntu/netclass/server/node_modules/tsx/dist/cli.mjs /home/ubuntu/netclass/server/src/server.ts
+
+# 崩溃自动重启
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# 日志走 journald（用 `journalctl -u netclass` 看）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=netclass
+
+# 安全加固（轻度，Phase 0 够用）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/netclass/server
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
