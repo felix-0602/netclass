@@ -74,6 +74,58 @@ describe('detectAndConfirmPopup', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 
+  test('W3+++ 高数课实测：.maskDiv.jobFinishTip 容器 + .nextChapter 按钮 → confirmed', () => {
+    document.body.innerHTML = `
+      <div class="maskDiv jobFinishTip">
+        <div class="popDiv wid440 popMove">
+          <a class="jb_btn jb_btn_92 fr fs14 preChapter">上一节</a>
+          <a class="jb_btn jb_btn_92 fr fs14 nextChapter">下一节</a>
+          <a class="btnBlue popMoveDele">去学习</a>
+        </div>
+      </div>
+    `;
+    const next = document.querySelector<HTMLAnchorElement>('a.nextChapter')!;
+    const prev = document.querySelector<HTMLAnchorElement>('a.preChapter')!;
+    const nextSpy = vi.spyOn(next, 'click');
+    const prevSpy = vi.spyOn(prev, 'click');
+
+    const r = detectAndConfirmPopup(document);
+    expect(r.status).toBe('confirmed');
+    if (r.status === 'confirmed') {
+      expect(r.container).toBe('.maskDiv.jobFinishTip');
+      expect(r.confirm).toContain('nextChapter');
+    }
+    expect(nextSpy).toHaveBeenCalledTimes(1);
+    // 关键：不能点上一节！
+    expect(prevSpy).not.toHaveBeenCalled();
+  });
+
+  test('W3+++: .popDiv.popMove 容器（高数课实测兄弟节点也是合法 trigger）', () => {
+    document.body.innerHTML = `
+      <div class="popDiv wid440 popMove">
+        <a class="jb_btn jb_btn_92 fr fs14 nextChapter">下一节</a>
+      </div>
+    `;
+    const r = detectAndConfirmPopup(document);
+    expect(r.status).toBe('confirmed');
+    if (r.status === 'confirmed') {
+      expect(r.container).toBe('.popDiv.popMove');
+    }
+  });
+
+  test('W3+++: #jobFinishTip id 形式容器', () => {
+    document.body.innerHTML = `
+      <div id="jobFinishTip">
+        <a class="jb_btn jb_btn_92 fr fs14 nextChapter">下一节</a>
+      </div>
+    `;
+    const r = detectAndConfirmPopup(document);
+    expect(r.status).toBe('confirmed');
+    if (r.status === 'confirmed') {
+      expect(r.container).toBe('#jobFinishTip');
+    }
+  });
+
   test('自定义 selector 覆盖默认值', () => {
     document.body.innerHTML = `
       <div class="custom-modal">

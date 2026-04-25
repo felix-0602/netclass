@@ -78,4 +78,37 @@ describe('jumpNextChaoxingTask', () => {
     const result = await promise;
     expect(result.status).toBe('at_end');
   });
+
+  test('W3+++: cards iframe src 改了（章内切节）→ 不触发 popup detect', async () => {
+    // 模拟 chaoxing 章内切节：点击改 cards iframe num=，top URL 不变
+    document.body.innerHTML = `
+      <a id="prevNextFocusNext">下一节</a>
+      <iframe id="cards" src="https://mooc1.chaoxing.com/cards?num=0"></iframe>
+      <!-- popup 容器但 hidden — 若 W3+++ 误以为没跳，会去找 popup -->
+      <div class="maskDiv jobFinishTip" style="display:none">
+        <a class="jb_btn jb_btn_92 fr fs14 nextChapter">下一节</a>
+      </div>
+    `;
+    const btn = document.getElementById('prevNextFocusNext')!;
+    const cards = document.getElementById('cards') as HTMLIFrameElement;
+    const popupBtn = document.querySelector<HTMLAnchorElement>('a.nextChapter')!;
+    const popupSpy = vi.spyOn(popupBtn, 'click');
+
+    // click 时改 cards iframe src（模拟 chaoxing PCount.next 逻辑）
+    btn.addEventListener('click', () => {
+      cards.src = 'https://mooc1.chaoxing.com/cards?num=3';
+    });
+
+    const promise = jumpNextChaoxingTask({ settleDelaySec: 0, popupRetryMs: 200 });
+    await vi.advanceTimersByTimeAsync(300);
+    const result = await promise;
+
+    expect(result.status).toBe('jumped');
+    if (result.status === 'jumped') {
+      // 应只命中主按钮 selector，不带 popup 后缀
+      expect(result.buttonSelector).toBe('#prevNextFocusNext');
+    }
+    // popup 按钮不应被点 — 因为 cards iframe src 变化已说明跳成功
+    expect(popupSpy).not.toHaveBeenCalled();
+  });
 });

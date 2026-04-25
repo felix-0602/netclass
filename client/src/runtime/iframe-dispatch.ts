@@ -41,7 +41,14 @@ export function classifyIframe(iframe: HTMLIFrameElement): IframeMetadata {
   } else if (src.includes('/api/work') || src.includes('/mooc-ans/api/work')) {
     kind = 'work';
   } else if (src.includes('modules/video') || /\bvideo\b/.test(src)) {
-    kind = 'video';
+    // 实测高数课 1.1：iframe id="mindmap" 也用 modules/video/index.html 作为壳，
+    // 但其实是脑图控件不是真视频。被误判会让 course-runner 进 video-pending 死等。
+    // 同理 .min_map_iframe 父容器也是非视频壳。
+    if (iframe.id === 'mindmap' || parentClass.includes('min_map_iframe')) {
+      kind = 'ignored';
+    } else {
+      kind = 'video';
+    }
   } else if (src.includes('modules/audio') || /\baudio\b/.test(src)) {
     kind = 'audio';
   } else if (/modules\/(ppt|pptx|doc|docx|pdf)/.test(src)) {

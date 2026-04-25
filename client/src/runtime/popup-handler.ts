@@ -1,11 +1,14 @@
 // chaoxing 弹窗 handler
 //
-// 触发场景（实测 2026-04 高数课）：
-//   - 进入未完成章节 chaoxing 自动 popup："上一章未完成，是否继续学习"
-//   - jumpNext 触发 #prevNextFocusNext 后，本章有未完成任务点 → 弹窗 "继续学习" 拦截
+// 触发场景（实测 2026-04 高数课 W3+++）：
+//   - jumpNext 触发 #prevNextFocusNext 后，本章有未完成任务点 → 弹"任务点未完成，是否去完成？"
+//   - 实测 popup 容器 = `.maskDiv.jobFinishTip` + 兄弟 `.popDiv.wid440.popMove`
+//   - 内含按钮：上一节 (.preChapter) / 下一节 (.nextChapter) / 去学习 (.popMoveDele)
+//   - 旧版 chaoxing 用 `.jb_dialog` 容器 — 仍兼容
 //
-// 弹窗确认按钮 selector 撞 .nextChapter（同名 class），所以**必须**先确认弹窗容器存在 + 可见
-// 才能点，否则会误把页面正常的"下一章节"按钮当弹窗按钮点。
+// 安全保护：弹窗确认按钮 .nextChapter 跟页面正常 `<a class="...nextChapter">` 撞 selector
+// （但跟 page 主按钮 `<div id="prevNextFocusNext">` 不会撞，因为 tag 不同）。
+// 所以**先验容器可见**再点按钮，是核心防误触机制。
 
 export interface PopupConfig {
   /** 弹窗容器 selector — 用来判断"弹窗确实出现了" */
@@ -20,19 +23,23 @@ export type PopupResult =
   | { status: 'no-confirm-button'; container: string };
 
 const DEFAULT_CONTAINER_SELECTORS = [
-  // chaoxing jb_dialog（实测命中 — 高数课"未完成任务"弹窗）
+  // 实测高数课命中：mask 层 + dialog 层（chaoxing 同时渲染两层，任一可见即说明 popup 起来了）
+  '.maskDiv.jobFinishTip',
+  '#jobFinishTip',
+  '.popDiv.popMove',
+  // 旧版 chaoxing 兼容
   '.jb_dialog',
-  // chaoxing layui 风格弹窗
   '.layui-layer-dialog',
-  // 兜底：常见 modal 容器
   '#chapterTaskDialog',
 ];
 
 const DEFAULT_CONFIRM_SELECTORS = [
-  // 实测：a.jb_btn.jb_btn_92.fr.fs14.nextChapter（高数课弹窗，size 92x36）
+  // 实测：a.jb_btn.jb_btn_92.fr.fs14.nextChapter（高数课"任务点未完成"弹窗的"下一节"按钮）
   'a.jb_btn.jb_btn_92.fr.fs14.nextChapter',
+  // 老的 jb_dialog 容器 + nextChapter（兼容旧版）
   '.jb_dialog .nextChapter',
   '.jb_dialog .jb_btn',
+  // layui 风格
   '.layui-layer-btn0',
 ];
 

@@ -5,6 +5,43 @@
 
 ## [Unreleased]
 
+### Phase 0 W3+++ — 高数课全 chrome 跑 + 3 类新阻碍补丁 (2026-04-25)
+
+> 在 gstack /browse 里直接跑模拟脚本（不依赖用户已装的 userscript）走高数课 1.1 章，
+> 通过 inline JS probe 识别真实运行时阻碍。补丁的依据是**实测样本**，不是猜。
+
+#### Findings（实测笔记）
+
+| ID | 现象 | 根因 |
+|---|---|---|
+| **B1** | 用户脚本在第 1 节后停在 idle，状态 "已过 1 节" 不动 | iframe `id="mindmap"` 用 `modules/video/index.html` 路径被误分类为 video → course-runner 进 `video-pending` 等真视频结束 → mindmap 不是视频，永远不触发 jumpNext |
+| **B2** | jumpNext popup 自动确认完全失效 | chaoxing 实际 popup 容器是 `.maskDiv.jobFinishTip` + 兄弟 `.popDiv.wid440.popMove`，不是 W3++ 默认的 `.jb_dialog`。容器先验失败 → 返回 `no-popup` → popup 永远在 → URL 不动 → course-runner 死等 |
+| **B3** | 章内点 #prevNextFocusNext 改 cards num= 不改 top URL，jumpNext 误判"被 popup 拦了" | jumpNext 的 popupRetryMs 路径只比对 `ownerWin.location.href`，没考虑 chaoxing SPA 章内 navigation 通过 cards iframe.src 体现 |
+
+#### Changed
+
+- `client/src/runtime/popup-handler.ts` — `DEFAULT_CONTAINER_SELECTORS` 加 `.maskDiv.jobFinishTip`、`#jobFinishTip`、`.popDiv.popMove`（按实测优先级前置）。旧的 `.jb_dialog` / `.layui-layer-dialog` 保留兼容。
+- `client/src/runtime/iframe-dispatch.ts` — `classifyIframe` 在 video 分支加 mindmap guard：`iframe.id === 'mindmap'` 或父 class 含 `min_map_iframe` → 归 `ignored`。
+- `client/src/time-padder/chaoxing-task.ts` — `jumpNextChaoxingTask` 的 popupRetryMs 路径除比对 top URL 外，**还比对所有 iframe.src 列表快照**。任一变化即视作 navigation 成功 → 不触发 popup detection。
+
+#### Tests
+
+- `client/test/popup-handler.spec.ts` — +3 用例（实测 .maskDiv.jobFinishTip / .popDiv.popMove / #jobFinishTip 命中 + preChapter 不被误点）
+- `client/test/runtime.spec.ts` — +3 用例（mindmap id / min_map_iframe parent / 正常 video 不受影响）
+- `client/test/chaoxing-task.spec.ts` — +1 用例（cards iframe src 变化跳过 popup detect）
+
+**测试统计**：client 161 (+7) / e2e 7 / server 34 = **202 测试全绿**。typecheck 过。bundle 806KB。
+
+#### 实测验证证据
+
+走 gstack browse 在用户的 chrome 里：
+- ✅ chapter 1.1 (chapterId=1056401944) 实测 14 个 iframe，含 mindmap 误分类样本
+- ✅ click `#prevNextFocusNext` 实测 cards iframe `num=0 → num=3`，top URL 不变
+- ✅ click 触发 popup `.maskDiv.jobFinishTip` + `.popDiv.wid440.popMove` 实测可见，但 W3++ 旧 selector 无法匹配
+- ✅ popup 内 `a.jb_btn.jb_btn_92.fr.fs14.nextChapter` 点击实测 `num=3 → num=4`
+
+---
+
 ### Phase 0 W3++ — 高数课实测 3 阻碍补丁 (2026-04-25)
 
 > 实测高数课"全课代戉"流程，识别并修 3 个阻碍。代码改动局限于 client/runtime 与 time-padder。

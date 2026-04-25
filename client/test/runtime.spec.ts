@@ -240,6 +240,31 @@ describe('iframe-dispatch.classifyIframe', () => {
     expect(classifyIframe(f).kind).toBe('finished');
   });
 
+  test('W3+++: id="mindmap" 走 modules/video/ 但不算 video（实测高数课 1.1）', () => {
+    const f = document.createElement('iframe');
+    f.id = 'mindmap';
+    f.src = 'https://mooc1.chaoxing.com/ananas/modules/video/index.html?v=2026-0420-1729';
+    expect(classifyIframe(f).kind).toBe('ignored');
+  });
+
+  test('W3+++: 父容器 class 含 min_map_iframe 也跳过 video 分类', () => {
+    const parent = document.createElement('div');
+    parent.className = 'min_map_iframe';
+    const f = document.createElement('iframe');
+    f.src = 'https://mooc1.chaoxing.com/ananas/modules/video/index.html';
+    parent.appendChild(f);
+    expect(classifyIframe(f).kind).toBe('ignored');
+  });
+
+  test('W3+++: 正常 video iframe 不受 mindmap guard 影响', () => {
+    const parent = document.createElement('div');
+    parent.className = 'ans-attach-ct videoContainer';
+    const f = document.createElement('iframe');
+    f.src = 'https://mooc1.chaoxing.com/ananas/modules/video/index.html';
+    parent.appendChild(f);
+    expect(classifyIframe(f).kind).toBe('video');
+  });
+
   test('javascript: src → ignored', () => {
     const f = document.createElement('iframe');
     f.src = 'javascript:void(0)';

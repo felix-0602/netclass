@@ -85,9 +85,11 @@ export async function jumpNextChaoxingTask(
     return { status: 'no_button' };
   }
 
-  // 记 click 前的 URL 用来判断是否被弹窗拦了
+  // 记 click 前的状态：top URL + 所有 iframe.src（chaoxing 章内切节只动 cards iframe src，
+  // top URL 不变 — 实测 W3+++ 高数课 1.1 num=0→3 正是这种）
   const ownerWin = root.defaultView ?? (typeof window !== 'undefined' ? window : null);
   const urlBefore = ownerWin?.location?.href;
+  const iframesBefore = snapshotIframeSrcs(root);
 
   found.el.click();
 
@@ -95,7 +97,11 @@ export async function jumpNextChaoxingTask(
   if (popupRetryMs > 0 && ownerWin) {
     await sleep(popupRetryMs);
     const urlAfter = ownerWin.location?.href;
-    if (urlAfter === urlBefore) {
+    const iframesAfter = snapshotIframeSrcs(root);
+    const navigationHappened =
+      urlAfter !== urlBefore || !sameIframeSrcs(iframesBefore, iframesAfter);
+    if (!navigationHappened) {
+      // 真没跳 — 大概率被 popup 拦了
       const popup = detectAndConfirmPopup(root);
       if (popup.status === 'confirmed') {
         return {
@@ -107,6 +113,18 @@ export async function jumpNextChaoxingTask(
   }
 
   return { status: 'jumped', buttonSelector: found.selector };
+}
+
+function snapshotIframeSrcs(root: Document): string[] {
+  return Array.from(root.querySelectorAll<HTMLIFrameElement>('iframe')).map((f) => f.src || '');
+}
+
+function sameIframeSrcs(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 function sleep(ms: number): Promise<void> {
