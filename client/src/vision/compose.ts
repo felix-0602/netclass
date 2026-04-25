@@ -72,11 +72,33 @@ export async function composeQuestionImage(refs: ImgRef[]): Promise<Blob> {
 }
 
 /**
- * 用 GM_xmlhttpRequest 获取图片（自动带 referer = 当前页）。
- * 不用原生 fetch 因为 p.ananas.chaoxing.com 有 referer 校验。
+ * 拉公式图。先试普通 fetch — 实测 2026-04 高数课
+ * `p.ananas.chaoxing.com` 服务器给 CORS 头，原生 fetch 直接 200。
+ * fetch 失败再 fallback GM_xmlhttpRequest（旧版超星 / 其他无 CORS 域）。
+ *
+ * 这条改动要紧：原方案只走 GM 必须 @connect 白名单，
+ * Tampermonkey 加白名单要 user 重装脚本（version 不动则不更新），
+ * 实测线上 22 道新题里只 2 道带图就是因为旧装 GM @connect 漏域。
  */
-function fetchImageBitmap(url: string): Promise<ImageBitmap> {
-  return new Promise((resolve, reject) => {
+async function fetchImageBitmap(url: string): Promise<ImageBitmap> {
+  // 1. 普通 fetch 优先（无 GM 依赖、无 @connect 白名单要求）
+  try {
+    const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (r.ok) {
+      const blob = await r.blob();
+      return await createImageBitmap(blob);
+    }
+    // 200 段以外才 fallback；CORS 失败会直接 throw，由下面 catch 接
+  } catch {
+    // fallthrough to GM
+  }
+
+  // 2. fallback GM_xmlhttpRequest（要 @connect 白名单 + 用户脚本环境）
+  return new Promise<ImageBitmap>((resolve, reject) => {
+    if (typeof GM_xmlhttpRequest !== 'function') {
+      reject(new Error(`fetch failed and GM_xmlhttpRequest unavailable: ${url}`));
+      return;
+    }
     GM_xmlhttpRequest({
       url,
       method: 'GET',
@@ -89,8 +111,8 @@ function fetchImageBitmap(url: string): Promise<ImageBitmap> {
           reject(e);
         }
       },
-      onerror: () => reject(new Error(`fetch image failed: ${url}`)),
-      ontimeout: () => reject(new Error(`fetch image timeout: ${url}`)),
+      onerror: () => reject(new Error(`GM fetch image failed: ${url}`)),
+      ontimeout: () => reject(new Error(`GM fetch image timeout: ${url}`)),
       timeout: 10_000,
     });
   });
