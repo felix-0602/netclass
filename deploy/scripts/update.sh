@@ -22,8 +22,9 @@ cd server
 echo "[1/4] git pull..."
 git pull --rebase
 
-echo "[2/4] npm install..."
-npm install --production=false --no-audit --no-fund
+echo "[2/4] npm ci..."
+# 用 npm ci 而不是 npm install — 严格按 lockfile，不会反过来改 lockfile（避免 dirty tree）
+npm ci --include=dev --no-audit --no-fund
 
 echo "[3/4] 应用新迁移（如有）..."
 npx tsx src/db/apply-migrations.ts
