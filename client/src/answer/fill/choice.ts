@@ -50,17 +50,25 @@ export function fillChoice(
     };
   }
 
-  // 构建 key(text) → li 映射。空文本（纯图片选项）跳过 —— 此时此题文本匹配不了
-  const optionsMap: Record<string, HTMLElement> = {};
+  // 构建两个映射：
+  //   labelMap: A/B/C/D → li（用于 server 返字母答案 "B" 直接定位）
+  //   textMap: optionText → li（用于历史/外部答案是文本时的匹配）
+  // server `/answer` 命中返 {value: "B", raw: ["B"]}，answers 全是字母 → 走 labelMap 直通
+  const labelMap: Record<string, HTMLElement> = {};
+  const textMap: Record<string, HTMLElement> = {};
   for (const li of optionLis) {
+    const numOpt = li.querySelector<HTMLElement>('.num_option');
+    const dataLabel = numOpt?.getAttribute('data')?.trim()
+      || numOpt?.textContent?.trim();
+    if (dataLabel && /^[A-Z]$/.test(dataLabel)) labelMap[dataLabel] = li;
     const text = extractChaoxingOptionText(li);
-    if (text) optionsMap[text] = li;
+    if (text) textMap[text] = li;
   }
 
-  if (Object.keys(optionsMap).length === 0) {
+  if (Object.keys(labelMap).length === 0 && Object.keys(textMap).length === 0) {
     return {
       status: 'unsupported',
-      message: '选项全是纯图片，当前不支持图片选项答题',
+      message: '选项 li 既无 A/B/C/D label 也无可读文本',
       matched: 0,
       total: answers.length,
     };
@@ -71,30 +79,39 @@ export function fillChoice(
 
   for (const rawAnswer of answers) {
     const cleanAnswer = removeHtml(rawAnswer);
-
-    // 1. 精确匹配
     let hitKey: string | null = null;
-    if (cleanAnswer in optionsMap && !selectedKeys.has(cleanAnswer)) {
+    let hitLi: HTMLElement | null = null;
+
+    // 1. 字母答案直通（最常见 — server hit 返 "A"/"B"/"C"/"D"）
+    if (/^[A-Z]$/.test(cleanAnswer) && labelMap[cleanAnswer] && !selectedKeys.has(cleanAnswer)) {
       hitKey = cleanAnswer;
+      hitLi = labelMap[cleanAnswer];
     }
 
-    // 2. 相似度兜底
-    if (!hitKey && useSimilarity) {
+    // 2. 文本精确匹配
+    if (!hitLi && cleanAnswer in textMap && !selectedKeys.has(cleanAnswer)) {
+      hitKey = cleanAnswer;
+      hitLi = textMap[cleanAnswer]!;
+    }
+
+    // 3. 相似度兜底（只针对文本，字母失败不再降级）
+    if (!hitLi && useSimilarity && Object.keys(textMap).length > 0) {
       const remaining: Record<string, HTMLElement> = {};
-      for (const [k, v] of Object.entries(optionsMap)) {
+      for (const [k, v] of Object.entries(textMap)) {
         if (!selectedKeys.has(k)) remaining[k] = v;
       }
       const best = findBestMatch(cleanAnswer, remaining, threshold);
-      if (best) hitKey = best.key;
+      if (best) {
+        hitKey = best.key;
+        hitLi = remaining[best.key]!;
+      }
     }
 
-    if (!hitKey) continue;
-
-    const li = optionsMap[hitKey]!;
+    if (!hitLi || !hitKey) continue;
     selectedKeys.add(hitKey);
-    if (!isChaoxingOptionSelected(li)) {
+    if (!isChaoxingOptionSelected(hitLi)) {
       try {
-        li.click();
+        hitLi.click();
       } catch {
         // click 失败不致命：记作匹配，让上层决定重试
       }

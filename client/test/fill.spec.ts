@@ -28,6 +28,50 @@ describe('fillChoice — 单选/多选', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
   });
 
+  test('W3v4 核心 bug 修：raw answer 是字母 "B" → 通过 num_option data-label 直接定位', () => {
+    // 模拟 server 返 {value:"B", raw:["B"]} 的命中场景
+    // 选项是公式图（无文字），旧版 fillChoice 用 text 匹配会 0 命中
+    const ctx = makeContext(`
+      <ul class="Zy_ulTop">
+        <li><span class="num_option" data="A">A</span><a class="fl after"><img src="..." data="%22y%3D2x%22"/></a></li>
+        <li><span class="num_option" data="B">B</span><a class="fl after"><img src="..." data="%22y%3Dx%5E2%2BC%22"/></a></li>
+        <li><span class="num_option" data="C">C</span><a class="fl after"><img src="..." data="%22y%3D2x%2B1%22"/></a></li>
+      </ul>
+    `);
+    const [a, b, c] = Array.from(ctx.timu.querySelectorAll('li')) as HTMLElement[];
+    const clicks = new Set<string>();
+    a.addEventListener('click', () => clicks.add('A'));
+    b.addEventListener('click', () => clicks.add('B'));
+    c.addEventListener('click', () => clicks.add('C'));
+
+    const res = fillChoice(ctx, ['B']);
+    expect(res.status).toBe('filled');
+    expect(clicks.has('B')).toBe(true);
+    expect(clicks.has('A')).toBe(false);
+    expect(clicks.has('C')).toBe(false);
+  });
+
+  test('W3v4: chaoxing shuffle (data ≠ display) → 按 data 字母选，不按 display A/B/C', () => {
+    // chaoxing 偶尔重排显示顺序但 data 字段保留真实字母
+    const ctx = makeContext(`
+      <ul class="Zy_ulTop">
+        <li><span class="num_option" data="C">A</span>显示A实际C</li>
+        <li><span class="num_option" data="A">B</span>显示B实际A</li>
+        <li><span class="num_option" data="B">C</span>显示C实际B</li>
+      </ul>
+    `);
+    const [li0, li1, li2] = Array.from(ctx.timu.querySelectorAll('li')) as HTMLElement[];
+    const clicks = new Set<string>();
+    li0.addEventListener('click', () => clicks.add('li0'));
+    li1.addEventListener('click', () => clicks.add('li1'));
+    li2.addEventListener('click', () => clicks.add('li2'));
+
+    // server 返 "B" → 应点 li2 (data="B")
+    const res = fillChoice(ctx, ['B']);
+    expect(res.status).toBe('filled');
+    expect(clicks.has('li2')).toBe(true);
+  });
+
   test('多选全答上 → filled', () => {
     const ctx = makeContext(`
       <ul class="Zy_ulTop">
