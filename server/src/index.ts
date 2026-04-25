@@ -13,6 +13,7 @@ import adminSubmitRoute from './routes/admin/submit';
 import adminUnbindRoute from './routes/admin/unbind-device';
 import adminImageRoute from './routes/admin/image';
 import adminCleanupRoute from './routes/admin/cleanup';
+import adminVerifyAnswerRoute from './routes/admin/verify-answer';
 import type { D1LikeDatabase } from './lib/db-sqlite-adapter';
 
 /**
@@ -78,6 +79,7 @@ app.route('/admin/submit', adminSubmitRoute);
 app.route('/admin/unbind-device', adminUnbindRoute);
 app.route('/admin/image', adminImageRoute);
 app.route('/admin/cleanup-broken', adminCleanupRoute);
+app.route('/admin/verify-answer', adminVerifyAnswerRoute);
 
 // 404
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'No such route' } }, 404));

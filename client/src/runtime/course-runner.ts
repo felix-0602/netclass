@@ -70,7 +70,8 @@ export async function runChapter(
       switch (m.kind) {
         case 'work': {
           const doc = m.iframe.contentDocument;
-          if (doc) await runFiller(doc);
+          // course-runner 跑全课时自动提交（章节测验场景），让 chaoxing 真记录答案 + 批改
+          if (doc) await runFiller(doc, { autoSubmit: true });
           handled++;
           break;
         }

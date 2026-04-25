@@ -11,6 +11,7 @@
 import { extractQuestionsFromChaoxing } from '../adapters/chaoxing';
 import type { ExtractedQuestion } from '../adapters/types';
 import { patchRuntimeState } from '../runtime/state';
+import { readMarks, submitWork } from '../runtime/work-submit';
 import { blobToBase64, composeQuestionImage, type ImgRef } from '../vision/compose';
 import { cacheGet } from './cache';
 import { getAnswer } from './client';
@@ -40,6 +41,11 @@ export interface RunFillerOptions {
   useSimilarity?: boolean;
   /** 若为 false，模拟走一遍（只查答案不点击），默认 true */
   actuallyFill?: boolean;
+  /**
+   * 全部填完后是否自动提交 chaoxing + 读批改结果回写 server。默认 false（用户手动决定）。
+   * 章节测验通常多次重做安全开；考试单次提交慎用。
+   */
+  autoSubmit?: boolean;
 }
 
 /**
@@ -197,6 +203,30 @@ export async function runFiller(
       phase: 'done',
       message: `完成：${summary.answered}/${summary.total}${summary.pending > 0 ? `，${summary.pending} 待` : ''}${summary.errors > 0 ? `，${summary.errors} 错` : ''}`,
     });
+
+    // 4. autoSubmit：填完点 chaoxing 提交按钮 + 等批改 + 读对错（不上传 — verify 走 admin）
+    if (opts.autoSubmit && summary.answered > 0) {
+      patchRuntimeState({ phase: 'submit', message: '正在提交作业到 chaoxing' });
+      const sr = await submitWork(rootDoc);
+      if (sr.status === 'submitted') {
+        patchRuntimeState({ message: '已提交，等批改...' });
+        await sleep(4000); // 给 chaoxing 4s 渲染批改 marker
+        const marks = readMarks(rootDoc);
+        const correct = marks.filter((m) => m.correct === 'correct').length;
+        const wrong = marks.filter((m) => m.correct === 'wrong').length;
+        const unknown = marks.filter((m) => m.correct === 'unknown').length;
+        patchRuntimeState({
+          phase: 'graded',
+          message: `批改：✓${correct} ✗${wrong} ?${unknown}`,
+        });
+        // 把 marks 暴露给 console，方便用户实测验证 marker selector 是否对
+        console.info('[netclass-sidekick/filler] chaoxing marks:', marks.map((m) => ({
+          input: m.inputName, correct: m.correct, evidence: m.evidence,
+        })));
+      } else {
+        patchRuntimeState({ message: `⚠ 提交失败：${sr.status}` });
+      }
+    }
 
     return summary;
   } finally {
