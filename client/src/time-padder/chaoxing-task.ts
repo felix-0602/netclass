@@ -1,11 +1,18 @@
 // 超星任务点自动跳转
 // 参考 app.js:5318-5342 watchIframe 尾部的"下一章节" 逻辑
 
+import { detectAndConfirmPopup } from '../runtime/popup-handler';
+
 export interface JumpNextOptions {
   /** 跳转前等待秒数，让超星自己的统计请求收尾 */
   settleDelaySec?: number;
   /** 搜寻按钮的 root document（支持跨 iframe 时传入） */
   root?: Document;
+  /**
+   * 点击后等多少 ms 看 URL 是否变；若没变 + 弹窗出现 → 自动点确认。
+   * 0 = 关闭（默认，保持向后兼容）。course-runner 默认传 1500。
+   */
+  popupRetryMs?: number;
 }
 
 export type JumpResult =
@@ -64,7 +71,7 @@ export function findNextChapterButton(
 export async function jumpNextChaoxingTask(
   opts: JumpNextOptions = {},
 ): Promise<JumpResult> {
-  const { settleDelaySec = 3, root = document } = opts;
+  const { settleDelaySec = 3, root = document, popupRetryMs = 0 } = opts;
 
   await sleep(settleDelaySec * 1000);
 
@@ -78,7 +85,27 @@ export async function jumpNextChaoxingTask(
     return { status: 'no_button' };
   }
 
+  // 记 click 前的 URL 用来判断是否被弹窗拦了
+  const ownerWin = root.defaultView ?? (typeof window !== 'undefined' ? window : null);
+  const urlBefore = ownerWin?.location?.href;
+
   found.el.click();
+
+  // popupRetryMs > 0 时检查弹窗（course-runner 用，单测保持快）
+  if (popupRetryMs > 0 && ownerWin) {
+    await sleep(popupRetryMs);
+    const urlAfter = ownerWin.location?.href;
+    if (urlAfter === urlBefore) {
+      const popup = detectAndConfirmPopup(root);
+      if (popup.status === 'confirmed') {
+        return {
+          status: 'jumped',
+          buttonSelector: `${found.selector} + popup:${popup.confirm}`,
+        };
+      }
+    }
+  }
+
   return { status: 'jumped', buttonSelector: found.selector };
 }
 

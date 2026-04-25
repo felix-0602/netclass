@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { resolvePageKind } from '../src/runtime/router';
-import { watchUrl } from '../src/runtime/url-watcher';
+import { watchInnerIframeUrls, watchUrl } from '../src/runtime/url-watcher';
 import { classifyIframe, scanIframes, dispatchIframes } from '../src/runtime/iframe-dispatch';
 
 describe('router.resolvePageKind', () => {
@@ -122,6 +122,87 @@ describe('url-watcher.watchUrl', () => {
     url = '/c';
     vi.advanceTimersByTime(1_000);
     expect(onChange).toHaveBeenCalledTimes(2); // 第一次抛错，但第二次仍触发
+  });
+});
+
+describe('url-watcher.watchInnerIframeUrls', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test('iframe src 不变不触发', () => {
+    document.body.innerHTML = '<iframe src="https://a.com/cards?num=1"></iframe>';
+    const onChange = vi.fn();
+    watchInnerIframeUrls(onChange, { intervalMs: 1000 });
+
+    vi.advanceTimersByTime(5_000);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('iframe src 变化触发，带新旧 src + iframe 引用', () => {
+    document.body.innerHTML = '<iframe id="f" src="https://a.com/cards?num=1"></iframe>';
+    const f = document.getElementById('f') as HTMLIFrameElement;
+    const onChange = vi.fn();
+    watchInnerIframeUrls(onChange, { intervalMs: 1000 });
+
+    // 先 1s 让初始 src 被记录
+    vi.advanceTimersByTime(1_000);
+    expect(onChange).not.toHaveBeenCalled();
+
+    f.src = 'https://a.com/cards?num=2';
+    vi.advanceTimersByTime(1_000);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const arg = onChange.mock.calls[0][0];
+    expect(arg.src).toContain('num=2');
+    expect(arg.prevSrc).toContain('num=1');
+    expect(arg.iframe).toBe(f);
+  });
+
+  test('cleanup 后不再触发', () => {
+    document.body.innerHTML = '<iframe id="f" src="https://a.com/?n=1"></iframe>';
+    const f = document.getElementById('f') as HTMLIFrameElement;
+    const onChange = vi.fn();
+    const stop = watchInnerIframeUrls(onChange, { intervalMs: 1000 });
+
+    vi.advanceTimersByTime(1_000); // 初始化
+    stop();
+    f.src = 'https://a.com/?n=2';
+    vi.advanceTimersByTime(5_000);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('多 iframe 各自独立追踪', () => {
+    document.body.innerHTML = `
+      <iframe id="a" src="https://x.com/?p=1"></iframe>
+      <iframe id="b" src="https://y.com/?q=1"></iframe>
+    `;
+    const a = document.getElementById('a') as HTMLIFrameElement;
+    const onChange = vi.fn();
+    watchInnerIframeUrls(onChange, { intervalMs: 1000 });
+
+    vi.advanceTimersByTime(1_000); // 初始化
+    a.src = 'https://x.com/?p=2';
+    vi.advanceTimersByTime(1_000);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].iframe).toBe(a);
+  });
+
+  test('onChange 抛错不会中断轮询', () => {
+    document.body.innerHTML = '<iframe id="f" src="https://a.com/?n=1"></iframe>';
+    const f = document.getElementById('f') as HTMLIFrameElement;
+    const onChange = vi.fn().mockImplementationOnce(() => { throw new Error('boom'); });
+    watchInnerIframeUrls(onChange, { intervalMs: 1000 });
+
+    vi.advanceTimersByTime(1_000);
+    f.src = 'https://a.com/?n=2';
+    vi.advanceTimersByTime(1_000);
+    f.src = 'https://a.com/?n=3';
+    vi.advanceTimersByTime(1_000);
+    expect(onChange).toHaveBeenCalledTimes(2);
   });
 });
 

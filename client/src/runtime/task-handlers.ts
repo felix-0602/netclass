@@ -8,30 +8,59 @@
 //
 // 所有 handler 是**幂等**的：完成态再调一次也不会出错（用于"扫一遍 + 跳下一节"循环里）。
 
-/** PPT/PDF/DOC reader：滚 #panView 子 iframe 到底 = 标记已读 */
+/**
+ * PPT/PDF/DOC reader：滚到底 = 标记已读
+ *
+ * chaoxing 的 PPT 容器有多种结构，按优先级尝试：
+ *   1. #panView 里的内层 iframe（老版本 .ppt）
+ *   2. .ans-attach-ct insertdoc 模块的 iframe（新版 .pptx 实测命中）
+ *   3. iframe 自身 document（兜底 — 内容直接渲染在 iframe 根 doc 里）
+ */
 export async function processPptReader(iframe: HTMLIFrameElement): Promise<{ ok: boolean; reason?: string }> {
   const ifWin = iframe.contentWindow;
   const ifDoc = iframe.contentDocument;
   if (!ifWin || !ifDoc) return { ok: false, reason: 'no contentWindow/Document' };
 
-  // chaoxing PPT 把内容嵌在 #panView 里另一层 iframe
-  const panView = ifDoc.querySelector<HTMLIFrameElement>('#panView');
-  const target = panView?.contentWindow ?? ifWin;
-  const targetDoc = panView?.contentDocument ?? ifDoc;
+  type ScrollTarget = { desc: string; win: Window; doc: Document };
 
-  try {
-    target.scrollTo({
-      top: targetDoc.body.scrollHeight,
-      behavior: 'smooth',
-    });
-    // 给浏览器 0.5s 滚到底（chaoxing 监听滚动事件计完成度）
-    await sleep(500);
-    // 再硬拉一次到底，防 smooth 滚不到
-    target.scrollTo(0, targetDoc.body.scrollHeight);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: (e as Error).message };
+  const candidates: Array<() => ScrollTarget | null> = [
+    () => {
+      const f = ifDoc.querySelector<HTMLIFrameElement>('#panView');
+      if (!f?.contentWindow || !f.contentDocument) return null;
+      return { desc: '#panView 内层 iframe', win: f.contentWindow, doc: f.contentDocument };
+    },
+    () => {
+      const wrap = ifDoc.querySelector('.ans-attach-ct');
+      const inner = wrap?.querySelector<HTMLIFrameElement>('iframe');
+      if (!inner?.contentWindow || !inner.contentDocument) return null;
+      return { desc: '.ans-attach-ct insertdoc iframe', win: inner.contentWindow, doc: inner.contentDocument };
+    },
+    () => ({ desc: 'iframe 自身 document', win: ifWin, doc: ifDoc }),
+  ];
+
+  let lastErr: string | undefined;
+  for (const find of candidates) {
+    const t = find();
+    if (!t) continue;
+    try {
+      const h = t.doc.body.scrollHeight;
+      t.win.scrollTo({ top: h, behavior: 'smooth' });
+      // chaoxing 监听 scroll 事件计完成度，给 0.5s 滚到底
+      await sleep(500);
+      // 再硬拉一次防 smooth 滚不到
+      t.win.scrollTo(0, h);
+      // 部分 .pptx 用 IntersectionObserver/scroll 计完成 — 主动派发一次
+      try {
+        t.win.dispatchEvent(new Event('scroll'));
+      } catch {
+        // ignore
+      }
+      return { ok: true, reason: t.desc };
+    } catch (e) {
+      lastErr = `${t.desc}: ${(e as Error).message}`;
+    }
   }
+  return { ok: false, reason: lastErr ?? 'all scroll targets failed' };
 }
 
 /** 电子书：调 chaoxing 暴露的 onchangepage(end) 翻到末页 */

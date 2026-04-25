@@ -13,10 +13,11 @@ import {
   stopCourseRunner,
 } from './runtime/course-runner';
 import { dispatchIframes } from './runtime/iframe-dispatch';
+import { detectAndConfirmPopup } from './runtime/popup-handler';
 import { currentPageKind } from './runtime/router';
 import { registerRuntimeActions, runtimeState } from './runtime/state';
 import { processBook, processPptReader } from './runtime/task-handlers';
-import { watchUrl } from './runtime/url-watcher';
+import { watchInnerIframeUrls, watchUrl } from './runtime/url-watcher';
 import { mountPanel } from './ui/mount';
 
 const BOOT_FLAG = '__netclassSidekickBooted__';
@@ -95,6 +96,29 @@ function boot() {
     },
     { intervalMs: 2000 },
   );
+
+  // 内层 iframe 监听 — chaoxing 部分场景（cards iframe 切 num=）只动 iframe src 不动 top URL，
+  // 不监听就漏。
+  watchInnerIframeUrls(
+    ({ src, prevSrc }) => {
+      console.info(`[netclass-sidekick] inner iframe src: ${prevSrc} → ${src}`);
+      if (courseProgress.active) {
+        setTimeout(() => onUrlChangeWhileRunning(document), 4000);
+      } else {
+        scheduleAutoScan(2500, 'inner iframe change');
+      }
+    },
+    { intervalMs: 2000 },
+  );
+
+  // 周期检测 chaoxing 弹窗（"未完成任务"等），自动放行 — 仅在 automation 开启时
+  setInterval(() => {
+    if (!runtimeState.automationEnabled) return;
+    const r = detectAndConfirmPopup(document);
+    if (r.status === 'confirmed') {
+      console.info(`[netclass-sidekick] auto-confirmed popup (${r.container} → ${r.confirm})`);
+    }
+  }, 3000);
 }
 
 let _autoScanTimer: ReturnType<typeof setTimeout> | null = null;

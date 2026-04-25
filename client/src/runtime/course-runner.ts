@@ -108,10 +108,14 @@ export async function runChapter(
     return { status: 'video-pending', handled };
   }
 
-  // 非视频任务：主动跳下一节
+  // 非视频任务：主动跳下一节（带 popup 自动确认 — 弹窗拦下时自动放行）
   patchRuntimeState({ message: `本节完成，${preJumpDelayMs / 1000}s 后跳下一节` });
   await sleep(preJumpDelayMs);
-  const jump = await jumpNextChaoxingTask({ root: rootDoc, settleDelaySec: 0 });
+  const jump = await jumpNextChaoxingTask({
+    root: rootDoc,
+    settleDelaySec: 0,
+    popupRetryMs: 1500,
+  });
 
   if (jump.status === 'jumped') {
     patchRuntimeState({ message: `跳下一节（${jump.buttonSelector}）` });

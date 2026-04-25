@@ -5,6 +5,52 @@
 
 ## [Unreleased]
 
+### Phase 0 W3++ — 高数课实测 3 阻碍补丁 (2026-04-25)
+
+> 实测高数课"全课代戉"流程，识别并修 3 个阻碍。代码改动局限于 client/runtime 与 time-padder。
+
+#### Added
+
+- `client/src/runtime/popup-handler.ts` — `detectAndConfirmPopup` 检测 chaoxing
+  "未完成任务"等弹窗 + 安全自动点确认。**容器先验** 防止误把页面正常的 `.nextChapter`
+  按钮当弹窗按钮点（实测高数课弹窗按钮 selector 是 `a.jb_btn.jb_btn_92.fr.fs14.nextChapter`，
+  跟章节页"下一节"撞名）。
+- `client/src/runtime/url-watcher.ts` — `watchInnerIframeUrls` 轮询内层 iframe `src`
+  变化。chaoxing 部分场景（cards iframe `num=` 切节）只动 iframe src 不动 top URL，
+  光监听 `location.href` 会漏。
+
+#### Changed
+
+- `client/src/runtime/task-handlers.ts` — `processPptReader` 改 fallback selector chain：
+  优先 `#panView` 内层 iframe，回退 `.ans-attach-ct` insertdoc（新版 .pptx 命中），
+  再回退 iframe 自身 doc。每次成功额外 dispatch 一次 `scroll` 事件兼容
+  IntersectionObserver 计完成的 .pptx。
+- `client/src/time-padder/chaoxing-task.ts` — `jumpNextChaoxingTask` 加
+  `popupRetryMs` opt：点击后等 N ms 看 URL 是否变；没变 + 弹窗出现 → 自动点确认。
+  默认 0（向后兼容），course-runner 默认传 1500。
+- `client/src/runtime/course-runner.ts` — runChapter 跳节时传 `popupRetryMs: 1500`。
+- `client/src/main.ts` — 接 `watchInnerIframeUrls`（同 watchUrl 的 dispatch 路径）+
+  3s 周期 `detectAndConfirmPopup`（仅在 `automationEnabled=true` 时生效）。
+
+#### Tests
+
+- `client/test/popup-handler.spec.ts` — 7 用例（容器不存在/隐藏/正常确认/防误触/layui/自定义）
+- `client/test/task-handlers.spec.ts` — 5 用例（panView/ans-attach-ct/iframe 自身/跨域 fallback）
+- `client/test/runtime.spec.ts` — +5 用例（`watchInnerIframeUrls` 不变/变/cleanup/多 iframe/抛错）
+
+**测试统计**：client 154 + e2e 7 + server 34 = **195 测试全绿**（+17 from W3+）。
+typecheck 客户端通过。bundle 805KB（+5KB）。
+
+#### Known issues / 未触及
+
+- chaoxing 弹窗目前只覆盖 `jb_dialog` / `layui-layer-dialog`；遇到新弹窗结构 → 加进
+  `DEFAULT_CONTAINER_SELECTORS`
+- watchInnerIframeUrls 跟 watchUrl 同时触发会导致 scanCurrent 双跑 — 已被
+  scheduleAutoScan 的 debounce + course-runner 幂等抵消，但理论上仍有竞态
+- bundle 仍 805KB（table.json inline 致），瘤减留 Phase 1
+
+---
+
 ### Phase 0 W3+ — 数学闭环 + 全课代戉 (2026-04-25)
 
 > 在 Phase 0 W3 基础上补完两个 Phase 1 TODO：数学题端到端可答 + 全自动走完整门课。
