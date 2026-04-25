@@ -222,25 +222,28 @@ function extractOptions(
       || String.fromCharCode(65 + idx);
     const dataLabel = numOption?.getAttribute('data')?.trim() || displayLabel;
 
-    // 选项里可能含 <img>——同样占位符化
+    // 选项里可能含多个 <img>（实测高数 1.7+ 章 "方程通解是 [img1] 在区间 [img2] 内" 这种）
+    // 旧版只取 firstImg + 整体 strip 所有 img → 后续 img 全丢、文字截成"方程通解是"前缀
+    // 修：所有 img 都 placeholder 化（跟题干 buildPlaceholderText 同套路），文本嵌 <<M>>
     const optionHtml = li.querySelector<HTMLElement>('.after, .clearfix.after')
       ?? li;
 
-    // 扫描选项里的图，追加到全局 images / texSpans（placeholder 索引延续）
-    const imgs = optionHtml.querySelectorAll('img');
-    let imageRef: string | null = null;
-    if (imgs.length > 0) {
-      const firstImg = imgs[0]!;
-      const src = firstImg.getAttribute('src') ?? firstImg.getAttribute('data-original') ?? '';
+    const cloneOpt = optionHtml.cloneNode(true) as HTMLElement;
+    cloneOpt.querySelectorAll('.num_option').forEach((el) => el.remove());
+
+    // 收集 + 替换：每个 img 在文本里留 <<Mn>> 占位符
+    const optImgs = cloneOpt.querySelectorAll('img');
+    const optImageRefs: string[] = [];
+    optImgs.forEach((img) => {
+      const src = img.getAttribute('src') ?? img.getAttribute('data-original') ?? '';
       const imgIdx = images.length;
       images.push(src);
 
       let latex: string | null = null;
-      const rawData = firstImg.getAttribute('data');
+      const rawData = img.getAttribute('data');
       if (rawData) {
         try {
-          const decoded = decodeURIComponent(rawData);
-          latex = decoded.replace(/^"|"$/g, '') || null;
+          latex = decodeURIComponent(rawData).replace(/^"|"$/g, '') || null;
         } catch {
           latex = null;
         }
@@ -248,14 +251,16 @@ function extractOptions(
 
       const placeholder = `<<M${imgIdx + 1}>>`;
       texSpans.push({ placeholder, latex, image_idx: imgIdx });
-      imageRef = placeholder;
-    }
+      optImageRefs.push(placeholder);
 
-    // 选项文字（移除 label 数字 A/B/C/D 自身、去 img 后的剩余文本）
-    const cloneOpt = optionHtml.cloneNode(true) as HTMLElement;
-    cloneOpt.querySelectorAll('img').forEach((img) => img.remove());
-    cloneOpt.querySelectorAll('.num_option').forEach((el) => el.remove());
+      const holder = cloneOpt.ownerDocument.createTextNode(placeholder);
+      img.parentNode?.replaceChild(holder, img);
+    });
+
     const text = (cloneOpt.textContent ?? '').trim().replace(/\s+/g, ' ') || null;
+
+    // image_ref：单图 → placeholder（向后兼容）；多图 → 文本里已嵌占位符，ref 留 null
+    const imageRef = optImageRefs.length === 1 ? optImageRefs[0]! : null;
 
     out.push({
       label: dataLabel,

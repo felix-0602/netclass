@@ -31,6 +31,19 @@ route.get('/', async (c) => {
     .bind(...args, limit)
     .all<PendingRow>();
 
+  // 拼图 URL：
+  //   - 配了 STORAGE_PUBLIC_BASE → 用公共 R2 URL（最快，cdn 可缓存）
+  //   - 没配 → 走 /admin/image/{hash} endpoint（需 admin key）— 实测 Phase 0 默认这条
+  // 旧版本回 PLACEHOLDER URL 是垃圾误导，第三方读 admin/pending 直接 404
+  const baseHost = `${new URL(c.req.url).protocol}//${new URL(c.req.url).host}`;
+  const imageUrlOf = (key: string | null): string | null => {
+    if (!key) return null;
+    if (c.env.STORAGE_PUBLIC_BASE) return `${c.env.STORAGE_PUBLIC_BASE}/${key}`;
+    // image_key 形如 stitched/<hash>.png；admin/image endpoint 取 hash 部分
+    const hash = key.replace(/^stitched\//, '').replace(/\.png$/, '');
+    return `${baseHost}/admin/image/${hash}`;
+  };
+
   const items = (rows.results ?? []).map((r) => ({
     id: r.id,
     platform: r.platform,
@@ -38,10 +51,7 @@ route.get('/', async (c) => {
     text: r.text,
     options: JSON.parse(r.options_json),
     tex_spans: JSON.parse(r.tex_spans_json),
-    composite_image_url: r.image_key
-      ? // R2 public URL. 部署时把 PLACEHOLDER 替换成 bucket 的 pub-<id>.r2.dev。
-        `${c.env.STORAGE_PUBLIC_BASE ?? 'https://PLACEHOLDER.r2.dev'}/${r.image_key}`
-      : null,
+    composite_image_url: imageUrlOf(r.image_key),
     context: r.context_json ? JSON.parse(r.context_json) : null,
     priority: r.priority,
     attempts: r.attempts,

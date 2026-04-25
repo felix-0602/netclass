@@ -120,6 +120,101 @@ describe('extractQuestionsFromChaoxing', () => {
     expect(qs[0]!.platform_id).toBe('405405676');
   });
 
+  test('W3v3: 选项含多个 img → 全部 placeholder 化，文本不被截断', () => {
+    // 模拟实测高数 1.7+ 章节常见的 "方程通解是 [img1] 在区间 [img2] 内" 选项
+    document.body.innerHTML = `
+      <form>
+        <div class="TiMu newTiMu">
+          <input type="hidden" name="answer404966999" />
+          <input type="hidden" name="answertype404966999" value="0" />
+          <div class="Zy_TItle clearfix">
+            <span>【单选题】求方程通解</span>
+          </div>
+          <div class="clearfix">
+            <ul class="Zy_ulTop">
+              <li>
+                <label class="fl before">
+                  <span class="num_option" data="A">A</span>
+                </label>
+                <div class="fl after">
+                  方程通解是
+                  <img class="ans-latex-moudle" src="https://p.ananas.chaoxing.com/star3/origin/aaa.png" data="%22y%3DC_1%20e%5Ex%22" />
+                  在区间
+                  <img class="ans-latex-moudle" src="https://p.ananas.chaoxing.com/star3/origin/bbb.png" data="%22(0%2C%5Cinfty)%22" />
+                  内
+                </div>
+              </li>
+              <li>
+                <label class="fl before">
+                  <span class="num_option" data="B">B</span>
+                </label>
+                <div class="fl after">纯文本选项</div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </form>
+    `;
+
+    const qs = extractQuestionsFromChaoxing(document);
+    expect(qs).toHaveLength(1);
+    const q = qs[0]!;
+
+    // 题干 0 张图，选项 A 有 2 张图 → images 应有 2 张
+    expect(q.images.length).toBe(2);
+    expect(q.tex_spans.length).toBe(2);
+    expect(q.tex_spans[0]!.latex).toBe('y=C_1 e^x');
+    expect(q.tex_spans[1]!.latex).toBe('(0,\\infty)');
+
+    // 选项 A 的 text 应嵌入两个 placeholder（不被截成 "方程通解是" 前缀）
+    expect(q.options).toHaveLength(2);
+    const optA = q.options.find((o) => o.label === 'A')!;
+    expect(optA.text).toContain('方程通解是');
+    expect(optA.text).toContain('在区间');
+    expect(optA.text).toContain('内');
+    expect(optA.text).toContain('<<M1>>');
+    expect(optA.text).toContain('<<M2>>');
+    // 多图情况下 image_ref 留 null，由 text 表达
+    expect(optA.image_ref).toBeNull();
+
+    const optB = q.options.find((o) => o.label === 'B')!;
+    expect(optB.text).toBe('纯文本选项');
+    expect(optB.image_ref).toBeNull();
+  });
+
+  test('W3v3: 选项单图保持 image_ref 兼容性（不破坏 v1/v2 行为）', () => {
+    document.body.innerHTML = `
+      <form>
+        <div class="TiMu newTiMu">
+          <input type="hidden" name="answer404967000" />
+          <input type="hidden" name="answertype404967000" value="0" />
+          <div class="Zy_TItle clearfix">
+            <span>【单选题】下列正确的是</span>
+          </div>
+          <div class="clearfix">
+            <ul class="Zy_ulTop">
+              <li>
+                <label class="fl before">
+                  <span class="num_option" data="A">A</span>
+                </label>
+                <div class="fl after">
+                  <img class="ans-latex-moudle" src="https://p.ananas.chaoxing.com/star3/origin/single.png" data="%22y%3D2x%22" />
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </form>
+    `;
+
+    const qs = extractQuestionsFromChaoxing(document);
+    const q = qs[0]!;
+    const optA = q.options[0]!;
+    // 单图：image_ref 仍是 placeholder（向后兼容）
+    expect(optA.image_ref).toBe('<<M1>>');
+    expect(q.tex_spans[0]!.latex).toBe('y=2x');
+  });
+
   test('跨域 iframe 访问 contentDocument 失败时不抛', () => {
     // 模拟跨域 iframe：把 contentDocument getter 改成 throw
     document.body.innerHTML = '<iframe id="xo"></iframe>';
