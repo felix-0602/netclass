@@ -5,6 +5,51 @@
 
 ## [Unreleased]
 
+### Phase 0 W3v2 — hash v2（options 排序无关）+ cleanup criteria 修正 (2026-04-25)
+
+> 用户问"题库有去重吗"时发现两个潜在 bug，一起修：
+
+#### 背景
+
+DB 里 60 道 pending 中 53 道含 `<<M>>` 占位但 image_key 为空。一开始判定 compose 没跑，
+仔细看 tex_spans 字段才发现：chaoxing 在 `<img.ans-latex-moudle data="%22latex%22">` 的
+data 属性里有 URL-encoded LaTeX 源，extractor 正确解析到 tex_spans[i].latex，
+**drain 直接读 latex 就能答**，根本不需要 compose 出图。
+
+W3v2 修两件事：
+1. cleanup-broken endpoint 之前用 `text 含 <<M>> && !image_key` 过度激进 → 误删带 LaTeX 文本的可答题
+2. hash 算法 options 顺序敏感 → chaoxing 偶尔 shuffle 选项 array → 同一道题不同 hash → 题库永远 miss
+
+#### Changed
+
+- `server/src/lib/hash.ts` + `client/src/answer/hash.ts` —— `hashQuestion` 加 options 按 label 字典序排序后再拼接（v2）。**Breaking change** — 跟 v1 hash 不兼容，需跑 migration。
+- `server/src/routes/admin/cleanup.ts` —— `missing_image_for_math` 标准加 `tex_spans 全 latex=null` 守护，避免误删带 LaTeX 文本的可答数学题。
+
+#### Added
+
+- `server/scripts/rehash-id.ts` —— 一次性 migration script，重算 `questions` 和 `pending_q` 表所有行的 id（hash）。dry-run 默认，`--commit` 才真改。事务包裹回滚安全。
+
+#### Tests
+
+- `server/test/hash.spec.ts` — +2 用例（v2 选项 array 顺序无关 / 内容变 hash 变）
+- `server/test/admin-cleanup.spec.ts` — +1 用例（v2 latex 非 null 不命中 missing_image_for_math） + 现有测试更新（matched 数 / 剩余 row 期待）
+- `client/test/hash.spec.ts` — flip "选项顺序有意义" → "v2 选项顺序无关" + 新加"内容变 hash 变"
+
+**测试统计**：client 162 (+1) / e2e 7 / server 43 (+3) = **212 测试全绿**。typecheck 过。bundle 807KB。
+
+#### 部署后必跑
+
+deploy server 后**必须**跑：
+```bash
+ssh ubuntu@182.254.180.181
+cd ~/netclass/server
+npx tsx scripts/rehash-id.ts             # dry-run，看会改多少行
+npx tsx scripts/rehash-id.ts --commit    # 真重算
+```
+不跑的话旧 row 用 v1 hash，新 client 用 v2 hash，永远 miss → 全部题重新进 pending。
+
+---
+
 ### Phase 0 W3++++ — compose 不上传 + 题库清扫端点 (2026-04-25)
 
 > /admin/pending 队列里 20 题全部 image_key=NULL，数学闭环看似没起作用。

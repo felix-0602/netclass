@@ -46,4 +46,45 @@ describe('hashQuestion', () => {
 
     expect(hash1).not.toBe(hash2);
   });
+
+  test('v2: options 顺序变 → hash 不变（chaoxing 实测会 shuffle 选项位置）', async () => {
+    const q1 = {
+      ...baseQuestion,
+      options: [
+        { label: 'A', text: 'apple', image_ref: null },
+        { label: 'B', text: 'banana', image_ref: null },
+        { label: 'C', text: 'cherry', image_ref: null },
+        { label: 'D', text: 'date', image_ref: null },
+      ],
+    };
+    const q2 = {
+      ...baseQuestion,
+      // 同样 4 个选项但 array 顺序打乱
+      options: [
+        { label: 'C', text: 'cherry', image_ref: null },
+        { label: 'A', text: 'apple', image_ref: null },
+        { label: 'D', text: 'date', image_ref: null },
+        { label: 'B', text: 'banana', image_ref: null },
+      ],
+    };
+    expect(await hashQuestion(q1)).toBe(await hashQuestion(q2));
+  });
+
+  test('v2: 选项内容变 → hash 变（不能因为排序就忽略内容差异）', async () => {
+    const q1 = {
+      ...baseQuestion,
+      options: [
+        { label: 'A', text: 'apple', image_ref: null },
+        { label: 'B', text: 'banana', image_ref: null },
+      ],
+    };
+    const q2 = {
+      ...baseQuestion,
+      options: [
+        { label: 'A', text: 'apricot', image_ref: null },
+        { label: 'B', text: 'banana', image_ref: null },
+      ],
+    };
+    expect(await hashQuestion(q1)).not.toBe(await hashQuestion(q2));
+  });
 });

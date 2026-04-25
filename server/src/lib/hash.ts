@@ -3,7 +3,10 @@ import { sha256Hex } from './auth';
 
 export async function hashQuestion(q: ExtractedQuestionLike): Promise<string> {
   const normText = normalize(q.text);
-  const normOpts = q.options
+  // chaoxing 实测会 shuffle options 顺序（同一题 A/B/C/D 文本对调位置）— 必须按 label
+  // 排序后再拼，否则同题不同 hash → 题库永远 miss。这是 v2 hash 的核心改动。
+  const normOpts = [...q.options]
+    .sort((a, b) => a.label.localeCompare(b.label))
     .map((o) => `${o.label}:${normalize(o.text ?? o.image_ref ?? '')}`)
     .join('|');
   const normTex = [...q.tex_spans]

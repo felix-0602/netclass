@@ -22,7 +22,11 @@ const STRIP_CHARS = /[​﻿ ]/g;
 
 export async function hashQuestion(q: QuestionHashInput): Promise<string> {
   const normText = normalize(q.text);
-  const normOpts = q.options
+  // chaoxing 实测会 shuffle options 顺序（同题 A/B/C/D 文本对调位置）— 按 label
+  // 排序后再拼。必须跟 server/src/lib/hash.ts 一字不差，否则 client/server 算的 hash
+  // 不一致，题库永远 miss。
+  const normOpts = [...q.options]
+    .sort((a, b) => a.label.localeCompare(b.label))
     .map((o) => `${o.label}:${normalize(o.text ?? o.image_ref ?? '')}`)
     .join('|');
   const normTex = [...q.tex_spans]

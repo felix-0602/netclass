@@ -116,7 +116,21 @@ function matchReason(
   const optionsRaw = row.options_json ?? '[]';
 
   if (criteria.includes('missing_image_for_math')) {
-    if (text.includes('<<M') && !row.image_key) return 'missing_image_for_math';
+    // 修：原标准 `text 含 <<M>> && 无 image` 过度激进 — chaoxing 大多数公式题 img.data
+    // 里有 URL-encoded LaTeX，extractor 写到 tex_spans[i].latex，drain 直接读 latex 就能答。
+    // 真正"没法读"的是：占位在题干 + 没图 + tex_spans 里所有 latex 都是 null。
+    if (text.includes('<<M') && !row.image_key) {
+      let texSpans: Array<{ latex: string | null; image_idx: number | null }> = [];
+      try {
+        texSpans = JSON.parse(row.tex_spans_json ?? '[]');
+      } catch {
+        texSpans = [];
+      }
+      const allLatexNull =
+        texSpans.length === 0 ||
+        texSpans.every((t) => t.latex === null || (t.latex ?? '').trim() === '');
+      if (allLatexNull) return 'missing_image_for_math';
+    }
   }
   if (criteria.includes('empty_options')) {
     let opts: Array<{ text: string | null }> = [];

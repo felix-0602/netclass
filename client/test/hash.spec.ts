@@ -58,7 +58,9 @@ describe('hashQuestion', () => {
     expect(a).not.toBe(b);
   });
 
-  test('选项顺序有意义（按 label 排序由调用方负责）', async () => {
+  test('v2: 选项 array 顺序无关（按 label 字典序内部排序）', async () => {
+    // chaoxing 实测会 shuffle 选项 array（A/B/C/D 在数组里位置随机），
+    // 这道测确保 hash 不受影响。
     const a = await hashQuestion(makeQ({
       options: [
         { label: 'A', text: '2', image_ref: null },
@@ -71,7 +73,23 @@ describe('hashQuestion', () => {
         { label: 'A', text: '2', image_ref: null },
       ],
     }));
-    expect(a).not.toBe(b); // options 顺序变化哈希变化
+    expect(a).toBe(b);
+  });
+
+  test('v2: 选项内容改了 → hash 变（排序不掩盖内容差异）', async () => {
+    const a = await hashQuestion(makeQ({
+      options: [
+        { label: 'A', text: '2', image_ref: null },
+        { label: 'B', text: '3', image_ref: null },
+      ],
+    }));
+    const b = await hashQuestion(makeQ({
+      options: [
+        { label: 'A', text: '4', image_ref: null }, // A 内容变
+        { label: 'B', text: '3', image_ref: null },
+      ],
+    }));
+    expect(a).not.toBe(b);
   });
 
   test('tex_spans 按 placeholder 排序后再哈希（顺序无关）', async () => {
