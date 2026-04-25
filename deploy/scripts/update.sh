@@ -6,7 +6,18 @@
 
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)/server"
+cd "$(git rev-parse --show-toplevel)"
+
+# 实测过坑：服务器偶发有调试 / 过期改动挡 git pull --rebase。
+# 自动 stash 一下 — 名字带时间戳，事后能 git stash list 看回。
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  STASH_NAME="auto-update-$(date +%Y%m%d-%H%M%S)"
+  echo "[0/4] 检测到本地未提交改动，先 stash → $STASH_NAME"
+  git stash push -u -m "$STASH_NAME"
+  echo "      （事后 git stash list 看回，git stash drop 丢弃）"
+fi
+
+cd server
 
 echo "[1/4] git pull..."
 git pull --rebase
