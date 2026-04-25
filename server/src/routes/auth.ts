@@ -25,7 +25,7 @@ route.post('/', async (c) => {
     .bind(cardkey_hash)
     .first<{
       id: string;
-      plan: 'monthly' | 'lifetime';
+      plan: 'monthly' | 'lifetime' | 'admin';
       bound_devices: string | null;
       monthly_exp: number | null;
       is_banned: number;
@@ -41,7 +41,7 @@ route.post('/', async (c) => {
     return c.json({ error: { code: 'banned', message: '卡密被封禁' } }, 403);
   }
 
-  // 过期检查（仅月订）
+  // 过期检查（仅月订；admin/lifetime 跳）
   const nowSec = Math.floor(Date.now() / 1000);
   if (user.plan === 'monthly' && user.monthly_exp && user.monthly_exp < nowSec) {
     return c.json(
@@ -50,15 +50,16 @@ route.post('/', async (c) => {
     );
   }
 
-  // 设备绑定
+  // 设备绑定 — admin plan 跳过设备数上限（开发者 / 自用），仍记录设备但不拒绝
   const devices: string[] = user.bound_devices ? JSON.parse(user.bound_devices) : [];
+  const DEVICE_LIMIT = 3;
   if (!devices.includes(device_fingerprint)) {
-    if (devices.length >= 3) {
+    if (user.plan !== 'admin' && devices.length >= DEVICE_LIMIT) {
       return c.json(
         {
           error: {
             code: 'device_limit',
-            message: '此卡密已绑定 3 个设备，联系管理员解绑或换卡密',
+            message: `此卡密已绑定 ${DEVICE_LIMIT} 个设备，联系管理员解绑或换卡密`,
           },
         },
         403,

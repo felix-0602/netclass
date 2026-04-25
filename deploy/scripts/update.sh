@@ -29,7 +29,7 @@ npm ci --include=dev --no-audit --no-fund
 echo "[3/4] 应用新迁移（如有）..."
 npx tsx src/db/apply-migrations.ts
 
-echo "[4/4] 重启 systemd service..."
+echo "[4/5] 重启 systemd service..."
 sudo systemctl restart netclass
 
 sleep 2
@@ -40,4 +40,15 @@ else
   echo "❌ 服务启动失败，日志："
   sudo journalctl -u netclass -n 30 --no-pager
   exit 1
+fi
+
+echo "[5/5] 清掉所有用户的设备绑定（admin plan 不会被设备数限制，但仍清零防累积）..."
+# 直接走 sqlite — 不通过 HTTP，省去找 admin key
+DB_PATH="${NETCLASS_DB:-$(pwd)/netclass.db}"
+if [ -f "$DB_PATH" ]; then
+  N_BEFORE=$(sqlite3 "$DB_PATH" "SELECT COALESCE(SUM(json_array_length(bound_devices)),0) FROM users WHERE bound_devices IS NOT NULL")
+  sqlite3 "$DB_PATH" "UPDATE users SET bound_devices='[]' WHERE bound_devices IS NOT NULL AND bound_devices != '[]'"
+  echo "      清掉 $N_BEFORE 个设备绑定"
+else
+  echo "      ⚠ 找不到 $DB_PATH，跳过设备清零（手动检查 NETCLASS_DB env）"
 fi

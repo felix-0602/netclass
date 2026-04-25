@@ -3,7 +3,7 @@
 
 export interface JwtPayload {
   sub: string; // user.id
-  plan: 'monthly' | 'lifetime';
+  plan: 'monthly' | 'lifetime' | 'admin';
   exp: number; // unix seconds
   fp: string; // device fingerprint hash
 }
