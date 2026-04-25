@@ -5,6 +5,51 @@
 
 ## [Unreleased]
 
+### Phase 0 W3++++ — compose 不上传 + 题库清扫端点 (2026-04-25)
+
+> /admin/pending 队列里 20 题全部 image_key=NULL，数学闭环看似没起作用。
+> 用 gstack browse 实测：extractor 输出正常，needsCompose 返 true，但 GM_xmlhttpRequest
+> 拒拉 `p.ananas.chaoxing.com` 上的公式图 — **@connect 白名单缺这个域名**。
+> 失败被 try/catch 静默吞，所以用户根本不知道。
+
+#### Findings（实测）
+
+| 环节 | 实测 | 结论 |
+|---|---|---|
+| extract | TiMu 4 选项识别正确，2 公式图 src 提取出 | ✅ |
+| needsCompose | tex_spans 含 `latex=null + image_idx`，返 true | ✅ |
+| compose fetch | GM_xmlhttpRequest 调 `p.ananas.chaoxing.com/star3/origin/...png` | ❌ Tampermonkey 拒（域名不在 @connect 白名单） |
+| /answer body | composite_image_b64=undefined 被传上去 | 服务端没图可存 → image_key=NULL |
+| 用户感知 | catch 块 console.warn 后继续，Panel 无任何提示 | silent failure 隐藏问题数周 |
+
+#### Fixed
+
+- **`client/vite.config.ts`** — `connect` 列表加 4 个 chaoxing 域：
+  `p.ananas.chaoxing.com` / `mooc1.chaoxing.com` / `mooc1-1.chaoxing.com` / `mooc2-ans.chaoxing.com`
+- **`client/src/answer/filler.ts`** — compose 失败时除 console.warn 外**还要**
+  `patchRuntimeState({ message: '⚠ 合图失败（{reason}）— 题进 pending 但无图' })`，
+  让 Panel 当场看到。Silent catch 是这次 bug 隐藏数周的根因，必须破。
+
+#### Added
+
+- **`server/src/routes/admin/cleanup.ts`** — `POST /admin/cleanup-broken` 批量清坏题。
+  4 类标准（`missing_image_for_math` / `empty_options` / `short_text` / `very_old`），
+  默认 `dry_run: true` 必须显式 false 才删。鉴权同其他 admin 端点（X-Admin-Key）。
+
+#### Tests
+
+- `server/test/admin-cleanup.spec.ts` — 6 用例（dry_run / 真删 / criteria 过滤 / 鉴权 / 空队列 / days_old 自定义）
+
+**测试统计**：client 161 / e2e 7 / server 40 (+6) = **208 测试全绿**。typecheck 过。bundle 806KB。
+
+#### Operational follow-up
+
+- 用户需 push + 重装 client（@connect 改了 必须重装才生效，热更新不行）
+- 用户需 SSH 部署新 server（cleanup endpoint 是新的）
+- 之后跑 `curl POST /admin/cleanup-broken {"dry_run":false}` 清掉 18 道无图坏题
+
+---
+
 ### Phase 0 W3+++ — 高数课全 chrome 跑 + 3 类新阻碍补丁 (2026-04-25)
 
 > 在 gstack /browse 里直接跑模拟脚本（不依赖用户已装的 userscript）走高数课 1.1 章，

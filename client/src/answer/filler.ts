@@ -125,8 +125,13 @@ export async function runFiller(
           try {
             composite_image_b64 = await composeAndEncode(q);
           } catch (e) {
+            // compose 失败仍尝试发文本，让服务端 pending 至少有 metadata。
+            // 但**必须**让用户在 Panel 看到（之前 W3+ silent catch 把 @connect 缺域名的事吞了 3 周）
+            const reason = (e as Error).message?.slice(0, 60) || 'unknown';
             console.warn('[netclass-sidekick/filler] compose failed:', e);
-            // compose 失败仍尝试发文本，让服务端 pending 至少有 metadata
+            patchRuntimeState({
+              message: `⚠ 合图失败（${reason}） — 题进 pending 但无图`,
+            });
           }
         }
 

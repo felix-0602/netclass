@@ -37,7 +37,14 @@ export default defineConfig({
           '127.0.0.1',
           // Phase 0 生产：腾讯云轻量 广州节点 裸 IP
           '182.254.180.181',
-          // Phase 2 如果加域名再写进来
+          // 数学公式 / 题目图托管域 — vision/compose.ts 的 GM_xmlhttpRequest 必须走白名单
+          // 实测 W3++++：高数课公式图全在 p.ananas.chaoxing.com/star3/origin/...png
+          // 不在白名单里 Tampermonkey 直接拒，compose 抛错被 catch 静默吞掉 → 题入库无图
+          'p.ananas.chaoxing.com',
+          'mooc1.chaoxing.com',
+          'mooc1-1.chaoxing.com',
+          'mooc2-ans.chaoxing.com',
+          // 知到 / U校园 后续接入再扩
         ],
         grant: [
           'GM_xmlhttpRequest',
