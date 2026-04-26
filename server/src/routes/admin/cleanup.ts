@@ -165,8 +165,20 @@ function matchReason(
     }
   }
   if (criteria.includes('short_text')) {
+    // 修：旧版 strip <<Mn>> 后算长度，但 cxsecret 混淆 + 占位符多的题（如 "1 【单选题】<<M1>>"）
+    // strip 后只剩 "1 【单选题】"，被误判 short。但实际 tex_spans.latex 含完整公式
+    // 文本（如 y''=1+y'^2），drain 能完整读题。
+    // 新算法：strip 占位符后**加回**所有 latex 文本算总长度。
+    let texSpans2: Array<{ latex: string | null }> = [];
+    try {
+      texSpans2 = JSON.parse(row.tex_spans_json ?? '[]');
+    } catch {
+      texSpans2 = [];
+    }
+    const latexTotal = texSpans2.reduce((sum, t) => sum + (t.latex ?? '').trim().length, 0);
     const stripped = text.replace(/<<M\d+>>/g, '').trim();
-    if (stripped.length > 0 && stripped.length < 10) return 'short_text';
+    const totalLen = stripped.length + latexTotal;
+    if (totalLen > 0 && totalLen < 10) return 'short_text';
   }
   if (criteria.includes('very_old')) {
     if (row.created_at < cutoffSec) return 'very_old';

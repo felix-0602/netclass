@@ -13,7 +13,7 @@ beforeEach(() => {
     // 1. 数学题缺图
     ['hash-math-noimg', 'chaoxing', 'single', '已知微分方程 <<M1>> 的通解为 <<M2>>', '[]', '[]', null, now],
     // 2. 选项全空
-    ['hash-empty-opts', 'chaoxing', 'single', '下列说法中正确的是', '[{"label":"A","text":null},{"label":"B","text":null}]', '[]', null, now],
+    ['hash-empty-opts', 'chaoxing', 'single', '下列关于齐次微分方程的说法中正确的是', '[{"label":"A","text":null},{"label":"B","text":null}]', '[]', null, now],
     // 3. 题干太短
     ['hash-short', 'chaoxing', 'single', '阶数', '[{"label":"A","text":"1"}]', '[]', null, now],
     // 4. 太老
@@ -24,6 +24,8 @@ beforeEach(() => {
     ['hash-math-with-latex', 'chaoxing', 'single', '已知微分方程 <<M1>> 的通解为 <<M2>>', '[{"label":"A","text":"答案A"},{"label":"B","text":"答案B"}]', '[{"placeholder":"<<M1>>","latex":"y\'=2x","image_idx":0},{"placeholder":"<<M2>>","latex":"y=x^2+C","image_idx":1}]', null, now],
     // 7: v3 实测命中 prod bug — 选项 text 全 null 但有 image_ref 指向 latex 文本，drain 可读，**不该**清
     ['hash-empty-opts-but-latex', 'chaoxing', 'single', '【单选题】下列哪个是 <<M1>> 的通解？', '[{"label":"A","text":null,"image_ref":"<<M2>>"},{"label":"B","text":null,"image_ref":"<<M3>>"}]', '[{"placeholder":"<<M1>>","latex":"y\'=2x","image_idx":0},{"placeholder":"<<M2>>","latex":"y=x^2+C","image_idx":1},{"placeholder":"<<M3>>","latex":"y=2x+C","image_idx":2}]', null, now],
+    // 8: v4 prod hit — 题面短 (cxsecret strip 后 < 10 字) + 占位符 + tex_spans latex 完整 → 旧 short_text 误判，新版加 latex 长度算总长不命中
+    ['hash-short-but-latex-long', 'chaoxing', 'single', '1 【单选题】<<M1>>', '[{"label":"A","text":"是"},{"label":"B","text":"不是"}]', '[{"placeholder":"<<M1>>","latex":"y\'\'=1+y\'^2 求通解","image_idx":0}]', null, now],
   ];
   for (const [id, platform, qtype, text, opts, tex, image_key, created] of rows) {
     ctx.env.rawDb
@@ -65,10 +67,12 @@ describe('POST /admin/cleanup-broken', () => {
     expect(json.samples.every((s) => s.id !== 'hash-math-with-latex')).toBe(true);
     // v3: 选项 text 全 null 但 image_ref 指向 latex 文本的题也不该出现
     expect(json.samples.every((s) => s.id !== 'hash-empty-opts-but-latex')).toBe(true);
+    // v4: 题面短但 latex 文本长的题也不该被 short_text 误判
+    expect(json.samples.every((s) => s.id !== 'hash-short-but-latex-long')).toBe(true);
 
-    // 数据库里仍是 7 行
+    // 数据库里仍是 8 行
     const cnt = ctx.env.rawDb.prepare('SELECT COUNT(*) AS n FROM pending_q').get() as { n: number };
-    expect(cnt.n).toBe(7);
+    expect(cnt.n).toBe(8);
   });
 
   test('dry_run=false 真删', async () => {
@@ -81,11 +85,12 @@ describe('POST /admin/cleanup-broken', () => {
     const remain = ctx.env.rawDb
       .prepare('SELECT id FROM pending_q ORDER BY id')
       .all() as Array<{ id: string }>;
-    // good + math-with-latex + empty-opts-but-latex 都该留
+    // good + math-with-latex + empty-opts-but-latex + short-but-latex-long 都该留
     expect(remain.map((r) => r.id).sort()).toEqual([
       'hash-empty-opts-but-latex',
       'hash-good',
       'hash-math-with-latex',
+      'hash-short-but-latex-long',
     ]);
   });
 
@@ -105,15 +110,23 @@ describe('POST /admin/cleanup-broken', () => {
       'hash-math-with-latex',
       'hash-old',
       'hash-short',
+      'hash-short-but-latex-long',
     ]);
   });
 
   test('v3 BUG fix: empty_options 不误判带 image_ref + latex 文本的题', async () => {
-    // 单独锁这条防回归 — prod 实测命中过的真 case
     const res = await callCleanup({ dry_run: true, criteria: ['empty_options'] });
     const json = (await res.json()) as { matched: number; samples: Array<{ id: string }> };
     expect(json.matched).toBe(1); // 只命中 hash-empty-opts（text 真空 + image_ref 也空）
     expect(json.samples[0].id).toBe('hash-empty-opts');
+  });
+
+  test('v4 BUG fix: short_text 不误判 latex 文本长的题', async () => {
+    // prod 实测：题面 "1 【单选题】<<M1>>" strip 后只 6 字符，但 latex y\'\'=1+y\'^2 完整可读
+    const res = await callCleanup({ dry_run: true, criteria: ['short_text'] });
+    const json = (await res.json()) as { matched: number; samples: Array<{ id: string }> };
+    expect(json.matched).toBe(1); // 只命中 hash-short（text=阶数 + 0 latex）
+    expect(json.samples[0].id).toBe('hash-short');
   });
 
   test('v2: <<M>> + tex_spans latex 非 null → missing_image_for_math 不命中', async () => {
