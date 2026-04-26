@@ -204,27 +204,42 @@ export async function runFiller(
       message: `完成：${summary.answered}/${summary.total}${summary.pending > 0 ? `，${summary.pending} 待` : ''}${summary.errors > 0 ? `，${summary.errors} 错` : ''}`,
     });
 
-    // 4. autoSubmit：填完点 chaoxing 提交按钮 + 等批改 + 读对错（不上传 — verify 走 admin）
-    if (opts.autoSubmit && summary.answered > 0) {
-      patchRuntimeState({ phase: 'submit', message: '正在提交作业到 chaoxing' });
-      const sr = await submitWork(rootDoc);
-      if (sr.status === 'submitted') {
-        patchRuntimeState({ message: '已提交，等批改...' });
-        await sleep(4000); // 给 chaoxing 4s 渲染批改 marker
-        const marks = readMarks(rootDoc);
-        const correct = marks.filter((m) => m.correct === 'correct').length;
-        const wrong = marks.filter((m) => m.correct === 'wrong').length;
-        const unknown = marks.filter((m) => m.correct === 'unknown').length;
+    // 4. autoSubmit：必须**全部题都答上**才提交。缺一道就跳过本节，避免提交不及格 +
+    //    chaoxing 弹"未到及格线请重做"的二次门槛。少答的题留着，下次同 hash 命中就能完整答。
+    if (opts.autoSubmit) {
+      const incomplete = summary.total - summary.answered;
+      if (incomplete > 0) {
         patchRuntimeState({
-          phase: 'graded',
-          message: `批改：✓${correct} ✗${wrong} ?${unknown}`,
+          phase: 'skipped',
+          message: `⏭ 跳过提交：${incomplete}/${summary.total} 题没答（题库不全），等下次有答案再交`,
         });
-        // 把 marks 暴露给 console，方便用户实测验证 marker selector 是否对
-        console.info('[netclass-sidekick/filler] chaoxing marks:', marks.map((m) => ({
-          input: m.inputName, correct: m.correct, evidence: m.evidence,
-        })));
+        console.info(
+          `[netclass-sidekick/filler] skip submit: ${incomplete} unanswered (pending=${summary.pending} errors=${summary.errors} unsupported=${summary.unsupported})`,
+        );
+      } else if (summary.answered === 0) {
+        // 防御：理论上 incomplete>0 已涵盖，这里二次保护
+        patchRuntimeState({ message: '⏭ 跳过提交：0 题答上' });
       } else {
-        patchRuntimeState({ message: `⚠ 提交失败：${sr.status}` });
+        patchRuntimeState({ phase: 'submit', message: '✅ 题全答完，提交到 chaoxing' });
+        const sr = await submitWork(rootDoc);
+        if (sr.status === 'submitted') {
+          patchRuntimeState({ message: '已提交，等批改...' });
+          await sleep(4000); // 给 chaoxing 4s 渲染批改 marker
+          const marks = readMarks(rootDoc);
+          const correct = marks.filter((m) => m.correct === 'correct').length;
+          const wrong = marks.filter((m) => m.correct === 'wrong').length;
+          const unknown = marks.filter((m) => m.correct === 'unknown').length;
+          patchRuntimeState({
+            phase: 'graded',
+            message: `批改：✓${correct} ✗${wrong} ?${unknown}`,
+          });
+          // marks 暴露给 console，方便实测验证 marker selector 是否对
+          console.info('[netclass-sidekick/filler] chaoxing marks:', marks.map((m) => ({
+            input: m.inputName, correct: m.correct, evidence: m.evidence,
+          })));
+        } else {
+          patchRuntimeState({ message: `⚠ 提交失败：${sr.status}` });
+        }
       }
     }
 

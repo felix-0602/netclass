@@ -41,6 +41,64 @@ describe('submitWork', () => {
     const r = await submitWork(document, { confirmDelayMs: 10 });
     expect(r.status).toBe('no-button');
   });
+
+  test('W3v6 实测：popup 在 top doc + 提交按钮 onclick 为空（jQuery 绑事件）→ 仍命中', async () => {
+    document.body.innerHTML = `
+      <a class="btnSubmit workBtnIndex">提交</a>
+      <div class="maskDiv" style="display:none"></div>
+      <div class="popDiv wid440 Marking" style="display:none">
+        <a class="popClose fr"></a>
+        <a class="jb_btn jb_btn_92 fr fs14">提交</a>
+        <a class="btnBlue btn_92_cancel fr fs14">取消</a>
+      </div>
+    `;
+    const main = document.querySelector<HTMLAnchorElement>('a.btnSubmit')!;
+    const confirmBtn = document.querySelector<HTMLAnchorElement>('.popDiv.wid440.Marking a.jb_btn.jb_btn_92:not(.btn_92_cancel)')!;
+    const cancelBtn = document.querySelector<HTMLAnchorElement>('.btn_92_cancel')!;
+    const closeBtn = document.querySelector<HTMLAnchorElement>('.popClose')!;
+    const confirmSpy = vi.spyOn(confirmBtn, 'click');
+    const cancelSpy = vi.spyOn(cancelBtn, 'click');
+    const closeSpy = vi.spyOn(closeBtn, 'click');
+
+    main.addEventListener('click', () => {
+      document.querySelector<HTMLElement>('.maskDiv')!.style.display = '';
+      document.querySelector<HTMLElement>('.popDiv.wid440.Marking')!.style.display = '';
+    });
+
+    const r = await submitWork(document, { confirmDelayMs: 50 });
+    expect(r.status).toBe('submitted');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    // 取消和关闭按钮**必须不被点**
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
+  });
+
+  test('W3v6: 提交后弹"未到及格线请重做" → status=submitted + redoPrompt 报告', async () => {
+    document.body.innerHTML = `
+      <a class="btnSubmit">提交</a>
+      <div class="popDiv wid440 Marking" style="display:none">
+        <a class="jb_btn jb_btn_92 fr fs14">提交</a>
+      </div>
+      <div class="popDiv" style="display:none" id="redo-prompt">
+        分数过低，未到及格线请重做
+      </div>
+    `;
+    const main = document.querySelector<HTMLAnchorElement>('a.btnSubmit')!;
+    main.addEventListener('click', () => {
+      document.querySelector<HTMLElement>('.popDiv.wid440.Marking')!.style.display = '';
+    });
+    // 模拟 confirm 点完后弹"未及格"提示
+    const confirmBtn = document.querySelector<HTMLAnchorElement>('.popDiv.wid440.Marking a.jb_btn.jb_btn_92')!;
+    confirmBtn.addEventListener('click', () => {
+      document.querySelector<HTMLElement>('#redo-prompt')!.style.display = '';
+    });
+
+    const r = await submitWork(document, { confirmDelayMs: 50 });
+    expect(r.status).toBe('submitted');
+    if (r.status === 'submitted') {
+      expect(r.redoPrompt).toContain('未到及格线');
+    }
+  });
 });
 
 describe('readMarks', () => {
@@ -92,6 +150,30 @@ describe('readMarks', () => {
     `;
     const marks = readMarks(document);
     expect(marks.map((m) => m.correct)).toEqual(['correct', 'wrong', 'unknown']);
+  });
+
+  test('W3v6 实测：CorrectOrNot 容器内 .marking_dui → correct', () => {
+    document.body.innerHTML = `
+      <div class="TiMu newTiMu ans-cc singleQuesId">
+        <input type="hidden" name="answer404966163" />
+        <div class="CorrectOrNot fl"><span class="marking_dui"></span></div>
+      </div>
+    `;
+    const marks = readMarks(document);
+    expect(marks[0]!.correct).toBe('correct');
+    expect(marks[0]!.evidence).toContain('marking_dui');
+  });
+
+  test('W3v6 实测：CorrectOrNot 容器内 .marking_cuo → wrong', () => {
+    document.body.innerHTML = `
+      <div class="TiMu newTiMu ans-cc singleQuesId">
+        <input type="hidden" name="answer404966164" />
+        <div class="CorrectOrNot fl"><span class="marking_cuo"></span></div>
+      </div>
+    `;
+    const marks = readMarks(document);
+    expect(marks[0]!.correct).toBe('wrong');
+    expect(marks[0]!.evidence).toContain('marking_cuo');
   });
 
   test('TiMu class 含 cuoti → wrong (兜底)', () => {
