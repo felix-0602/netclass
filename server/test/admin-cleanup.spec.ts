@@ -22,6 +22,8 @@ beforeEach(() => {
     ['hash-good', 'chaoxing', 'single', '正常题干文本完整可答', '[{"label":"A","text":"答案A"},{"label":"B","text":"答案B"}]', '[]', null, now],
     // 6. v2: 含 <<M>> 占位但 tex_spans 有 latex 文本 — drain 可读，不该清
     ['hash-math-with-latex', 'chaoxing', 'single', '已知微分方程 <<M1>> 的通解为 <<M2>>', '[{"label":"A","text":"答案A"},{"label":"B","text":"答案B"}]', '[{"placeholder":"<<M1>>","latex":"y\'=2x","image_idx":0},{"placeholder":"<<M2>>","latex":"y=x^2+C","image_idx":1}]', null, now],
+    // 7: v3 实测命中 prod bug — 选项 text 全 null 但有 image_ref 指向 latex 文本，drain 可读，**不该**清
+    ['hash-empty-opts-but-latex', 'chaoxing', 'single', '【单选题】下列哪个是 <<M1>> 的通解？', '[{"label":"A","text":null,"image_ref":"<<M2>>"},{"label":"B","text":null,"image_ref":"<<M3>>"}]', '[{"placeholder":"<<M1>>","latex":"y\'=2x","image_idx":0},{"placeholder":"<<M2>>","latex":"y=x^2+C","image_idx":1},{"placeholder":"<<M3>>","latex":"y=2x+C","image_idx":2}]', null, now],
   ];
   for (const [id, platform, qtype, text, opts, tex, image_key, created] of rows) {
     ctx.env.rawDb
@@ -51,7 +53,7 @@ describe('POST /admin/cleanup-broken', () => {
     const json = (await res.json()) as { dry_run: boolean; matched: number; deleted: number; samples: Array<{ id: string; reason: string }> };
     expect(json.dry_run).toBe(true);
     expect(json.deleted).toBe(0);
-    expect(json.matched).toBe(4); // math-noimg + empty-opts + short + old（hash-math-with-latex 不算）
+    expect(json.matched).toBe(4); // math-noimg + empty-opts + short + old（with-latex / opts-but-latex 都不算）
     const reasons = json.samples.map((s) => s.reason).sort();
     expect(reasons).toContain('missing_image_for_math');
     expect(reasons).toContain('empty_options');
@@ -61,10 +63,12 @@ describe('POST /admin/cleanup-broken', () => {
     expect(json.samples.every((s) => s.id !== 'hash-good')).toBe(true);
     // v2: 含 <<M>> 但 tex_spans 有 latex 文本的题不该出现
     expect(json.samples.every((s) => s.id !== 'hash-math-with-latex')).toBe(true);
+    // v3: 选项 text 全 null 但 image_ref 指向 latex 文本的题也不该出现
+    expect(json.samples.every((s) => s.id !== 'hash-empty-opts-but-latex')).toBe(true);
 
-    // 数据库里仍是 6 行
+    // 数据库里仍是 7 行
     const cnt = ctx.env.rawDb.prepare('SELECT COUNT(*) AS n FROM pending_q').get() as { n: number };
-    expect(cnt.n).toBe(6);
+    expect(cnt.n).toBe(7);
   });
 
   test('dry_run=false 真删', async () => {
@@ -77,8 +81,12 @@ describe('POST /admin/cleanup-broken', () => {
     const remain = ctx.env.rawDb
       .prepare('SELECT id FROM pending_q ORDER BY id')
       .all() as Array<{ id: string }>;
-    // hash-good + hash-math-with-latex 都该留
-    expect(remain.map((r) => r.id).sort()).toEqual(['hash-good', 'hash-math-with-latex']);
+    // good + math-with-latex + empty-opts-but-latex 都该留
+    expect(remain.map((r) => r.id).sort()).toEqual([
+      'hash-empty-opts-but-latex',
+      'hash-good',
+      'hash-math-with-latex',
+    ]);
   });
 
   test('criteria 单选 — 只清缺图数学题', async () => {
@@ -90,7 +98,22 @@ describe('POST /admin/cleanup-broken', () => {
     const remain = ctx.env.rawDb
       .prepare('SELECT id FROM pending_q ORDER BY id')
       .all() as Array<{ id: string }>;
-    expect(remain.map((r) => r.id).sort()).toEqual(['hash-empty-opts', 'hash-good', 'hash-math-with-latex', 'hash-old', 'hash-short']);
+    expect(remain.map((r) => r.id).sort()).toEqual([
+      'hash-empty-opts',
+      'hash-empty-opts-but-latex',
+      'hash-good',
+      'hash-math-with-latex',
+      'hash-old',
+      'hash-short',
+    ]);
+  });
+
+  test('v3 BUG fix: empty_options 不误判带 image_ref + latex 文本的题', async () => {
+    // 单独锁这条防回归 — prod 实测命中过的真 case
+    const res = await callCleanup({ dry_run: true, criteria: ['empty_options'] });
+    const json = (await res.json()) as { matched: number; samples: Array<{ id: string }> };
+    expect(json.matched).toBe(1); // 只命中 hash-empty-opts（text 真空 + image_ref 也空）
+    expect(json.samples[0].id).toBe('hash-empty-opts');
   });
 
   test('v2: <<M>> + tex_spans latex 非 null → missing_image_for_math 不命中', async () => {

@@ -133,16 +133,34 @@ function matchReason(
     }
   }
   if (criteria.includes('empty_options')) {
-    let opts: Array<{ text: string | null }> = [];
+    // 修：旧版只看 o.text 漏掉 image_ref + tex_spans.latex 路径。
+    // 选项可能是 "text=null + image_ref=<<M2>> + tex_spans[M2].latex='y=2x+C'" — drain 直接读 latex 答。
+    // 实测 prod dry-run 命中 3 道全是这种带 LaTeX 图的好题，旧标准会误删。
+    // 新判定：text 空 AND (image_ref 空 OR 对应 latex 也空 AND 没 image_key) → 真不可读
+    let opts: Array<{ text: string | null; image_ref: string | null }> = [];
+    let texSpans: Array<{ placeholder: string; latex: string | null }> = [];
     try {
       opts = JSON.parse(optionsRaw);
+      texSpans = JSON.parse(row.tex_spans_json ?? '[]');
     } catch {
       opts = [];
     }
-    if (
-      opts.length > 0 &&
-      opts.every((o) => o.text === null || (o.text ?? '').trim() === '')
-    ) {
+    const latexByPh: Record<string, string | null> = {};
+    for (const t of texSpans) latexByPh[t.placeholder] = t.latex ?? null;
+
+    const isOptionEmpty = (o: { text: string | null; image_ref: string | null }): boolean => {
+      const hasText = o.text !== null && (o.text ?? '').trim() !== '';
+      if (hasText) return false;
+      if (!o.image_ref) return true; // 文本空 + 没图 ref = 真空
+      const lx = latexByPh[o.image_ref];
+      const hasLatex = lx !== null && (lx ?? '').trim() !== '';
+      if (hasLatex) return false; // 有 latex 文本 → drain 可读
+      // 文本空 + image_ref 但 latex 空 → 看题级 image_key 是否有图（compose 拍下来了）
+      // image_key 非空 = vision 还能救；为空 = 真无救
+      return !row.image_key;
+    };
+
+    if (opts.length > 0 && opts.every(isOptionEmpty)) {
       return 'empty_options';
     }
   }
