@@ -1,12 +1,12 @@
 <template>
-  <!-- 折叠态：左下角小药丸，状态点 + 简短消息 -->
+  <!-- 折叠态：左下角小药丸 -->
   <div
     v-if="collapsed"
     class="ns-pill"
     :style="positionStyle"
     @mousedown="onDragStart"
     @click="collapsed = false"
-    :title="`Netclass Sidekick · ${session ? session.cardkey_preview : '未激活'} · ${runtimeState.message || ''}`"
+    :title="pillTitle"
   >
     <span class="ns-pill__dot" :class="`ns-dot--${dotKind}`" />
     <span class="ns-pill__label">{{ pillLabel }}</span>
@@ -15,85 +15,143 @@
   <!-- 展开态：完整面板 -->
   <div v-else class="ns-panel" :style="positionStyle" @mousedown.stop>
     <div class="ns-panel__header" @mousedown="onDragStart">
-      <span class="ns-panel__title">🥇 Netclass Sidekick</span>
-      <span class="ns-panel__minus" @click="collapsed = true" title="收起">─</span>
+      <div class="ns-header__main">
+        <span class="ns-panel__title">🥇 Netclass Sidekick</span>
+        <span class="ns-status-chip" :class="`ns-status-chip--${runtimeState.status}`">
+          {{ statusText }}
+        </span>
+      </div>
+      <div class="ns-header__meta">
+        <span v-if="lastSuccessText" class="ns-last-success" :title="lastSuccessTooltip">
+          {{ lastSuccessText }}
+        </span>
+        <span class="ns-panel__minus" @click="collapsed = true" title="收起">─</span>
+      </div>
     </div>
-    <div class="ns-panel__body">
-      <div class="ns-row">
-        <span>状态</span>
-        <strong :class="`ns-status ns-status--${runtimeState.status}`">{{ statusText }}</strong>
-      </div>
-      <div class="ns-row" v-if="runtimeState.phase && runtimeState.phase !== 'idle'">
-        <span>阶段</span>
-        <strong class="ns-phase">{{ runtimeState.phase }}</strong>
-      </div>
-      <div class="ns-row" v-if="runtimeState.message">
-        <span>信息</span>
-        <strong class="ns-message" :title="runtimeState.message">{{ truncate(runtimeState.message, 22) }}</strong>
-      </div>
-      <div class="ns-row" v-if="hasProgress">
-        <span>答题进度</span>
-        <strong>
-          {{ runtimeState.answered }} / {{ runtimeState.detected }}
-          <span v-if="runtimeState.pending > 0" class="ns-badge ns-badge--pending">{{ runtimeState.pending }} 待</span>
-          <span v-if="runtimeState.errors > 0" class="ns-badge ns-badge--err">{{ runtimeState.errors }} 错</span>
-        </strong>
-      </div>
-      <div class="ns-row">
-        <span>自动托管</span>
-        <strong>
-          <button class="ns-toggle" :class="{ 'ns-toggle--on': runtimeState.automationEnabled }" @click="onToggleAutomation">
-            {{ runtimeState.automationEnabled ? 'ON' : 'OFF' }}
-          </button>
-        </strong>
-      </div>
-      <div class="ns-row">
-        <span>平台</span>
-        <strong>{{ platform || '—' }}</strong>
-      </div>
-      <div class="ns-row">
-        <span>题库缓存</span>
-        <strong>{{ cacheStats.count }} 题 · {{ Math.round(cacheStats.bytes / 1024) }} KB</strong>
-      </div>
-      <div class="ns-row">
-        <span>账号</span>
-        <strong v-if="session" class="ns-account">
-          {{ session.cardkey_preview }}
-          <span class="ns-plan">{{ session.plan }}</span>
-        </strong>
-        <strong v-else class="ns-account ns-account--off">未激活</strong>
-      </div>
 
-      <div class="ns-actions">
-        <button @click="onManualScan" :disabled="!session" :title="!session ? '请先激活卡密' : '立即扫描当前页面题目'">
-          扫描
-        </button>
-        <button @click="$emit('open-settings')">设置</button>
+    <!-- Section triage banner -->
+    <div
+      v-if="triageBanner"
+      class="ns-triage"
+      :class="`ns-triage--${runtimeState.sectionTriage.state}`"
+    >
+      <strong class="ns-triage__title">{{ triageBanner.title }}</strong>
+      <p class="ns-triage__body">{{ triageBanner.body }}</p>
+      <div class="ns-triage__counts">
+        <span class="ns-chip ns-chip--ok">已命中 {{ runtimeState.sectionTriage.readyLocal }}</span>
+        <span v-if="runtimeState.sectionTriage.pending > 0" class="ns-chip ns-chip--pending">
+          收录中 {{ runtimeState.sectionTriage.pending }}
+        </span>
+        <span v-if="runtimeState.sectionTriage.errors > 0" class="ns-chip ns-chip--err">
+          异常 {{ runtimeState.sectionTriage.errors }}
+        </span>
       </div>
-      <div class="ns-actions">
+    </div>
+
+    <!-- 当前动作 -->
+    <div class="ns-current">
+      <span class="ns-current__label">当前</span>
+      <strong class="ns-current__msg" :title="runtimeState.message">
+        {{ runtimeState.message || '—' }}
+      </strong>
+    </div>
+
+    <!-- 控制台日志区 -->
+    <div class="ns-console-wrap">
+      <div class="ns-console-toolbar">
+        <span class="ns-console-title">运行日志（{{ runtimeState.logs.length }}/50）</span>
         <button
-          v-if="!courseRunning"
-          class="ns-btn--primary"
-          :disabled="!session"
-          @click="onStartCourse"
-          :title="!session ? '请先激活卡密' : '从当前章节开始，自动走完本门课所有任务点'"
+          class="ns-console-toggle"
+          :class="{ 'ns-console-toggle--paused': !autoScroll }"
+          @click="onToggleAutoScroll"
+          :title="autoScroll ? '当前自动滚到底；点击暂停' : '当前已暂停滚动；点击跟随最新'"
         >
-          🚀 全课代戉
-        </button>
-        <button v-else class="ns-btn--danger" @click="onStopCourse">
-          ⏹ 停止全课（已过 {{ courseChaptersHandled }} 节）
+          {{ autoScroll ? '跟随最新' : '已暂停' }}
         </button>
       </div>
-      <div class="ns-actions">
-        <button v-if="!session" class="ns-btn--primary" @click="openActivate">激活卡密</button>
-        <template v-else>
-          <button @click="openActivate">换卡密</button>
-          <button class="ns-btn--danger" @click="onLogout">退出</button>
-        </template>
+      <div ref="consoleEl" class="ns-console" @wheel="onConsoleWheel">
+        <div v-if="runtimeState.logs.length === 0" class="ns-console__empty">
+          暂无日志，等待扫描…
+        </div>
+        <div
+          v-for="event in runtimeState.logs"
+          :key="event.id"
+          class="ns-log"
+          :class="`ns-log--${event.level}`"
+        >
+          <time class="ns-log__ts">{{ formatClock(event.ts) }}</time>
+          <span class="ns-log__text">{{ event.text }}</span>
+        </div>
       </div>
     </div>
 
-    <!-- 卡密激活 Dialog -->
+    <!-- 详细信息（默认折叠） -->
+    <div class="ns-details">
+      <div class="ns-details__head" @click="detailsOpen = !detailsOpen">
+        <span>{{ detailsOpen ? '▾' : '▸' }} 账号 / 平台 / 缓存</span>
+      </div>
+      <div v-if="detailsOpen" class="ns-details__body">
+        <div class="ns-row">
+          <span>平台</span>
+          <strong>{{ platform || '—' }}</strong>
+        </div>
+        <div class="ns-row">
+          <span>题库缓存</span>
+          <strong>{{ cacheStats.count }} 题 · {{ Math.round(cacheStats.bytes / 1024) }} KB</strong>
+        </div>
+        <div class="ns-row">
+          <span>账号</span>
+          <strong v-if="session" class="ns-account">
+            {{ session.cardkey_preview }}
+            <span class="ns-plan">{{ session.plan }}</span>
+          </strong>
+          <strong v-else class="ns-account ns-account--off">未激活</strong>
+        </div>
+        <div class="ns-row">
+          <span>自动托管</span>
+          <strong>
+            <button
+              class="ns-toggle"
+              :class="{ 'ns-toggle--on': runtimeState.automationEnabled }"
+              @click="onToggleAutomation"
+            >
+              {{ runtimeState.automationEnabled ? 'ON' : 'OFF' }}
+            </button>
+          </strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作区 -->
+    <div class="ns-actions">
+      <button @click="onManualScan" :disabled="!session" :title="!session ? '请先激活卡密' : '立即扫描当前页面题目'">
+        扫描
+      </button>
+      <button @click="$emit('open-settings')">设置</button>
+    </div>
+    <div class="ns-actions">
+      <button
+        v-if="!courseRunning"
+        class="ns-btn--primary"
+        :disabled="!session"
+        @click="onStartCourse"
+        :title="!session ? '请先激活卡密' : '从当前章节开始，自动走完本门课所有任务点'"
+      >
+        🚀 全课代戉
+      </button>
+      <button v-else class="ns-btn--danger" @click="onStopCourse">
+        ⏹ 停止全课（已过 {{ courseChaptersHandled }} 节）
+      </button>
+    </div>
+    <div class="ns-actions">
+      <button v-if="!session" class="ns-btn--primary" @click="openActivate">激活卡密</button>
+      <template v-else>
+        <button @click="openActivate">换卡密</button>
+        <button class="ns-btn--danger" @click="onLogout">退出</button>
+      </template>
+    </div>
+
+    <!-- 卡密激活 Dialog（保留原样） -->
     <div v-if="dialogOpen" class="ns-modal" @click.self="closeDialog">
       <div class="ns-modal__card" @mousedown.stop>
         <div class="ns-modal__header">
@@ -144,7 +202,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { cacheStats as getCacheStats } from '@/answer/cache';
 import {
   activate,
@@ -172,10 +230,9 @@ const emit = defineEmits<{
   'session-change': [Session | null];
 }>();
 
-// UX 默认折叠 —— 跟原 app.js 风格一致：打开课程页就静默工作，不打扰
 const collapsed = ref(true);
+const detailsOpen = ref(false);
 
-// 默认贴左下角 —— 超星右侧"目录/讨论/笔记"侧栏会盖住右下角
 const pos = ref({ x: 16, y: Math.max(80, window.innerHeight - 56) });
 const positionStyle = computed(() => ({
   left: pos.value.x + 'px',
@@ -191,19 +248,39 @@ const STATUS_TEXT: Record<string, string> = {
 };
 const statusText = computed(() => STATUS_TEXT[runtimeState.status] ?? '空闲');
 
-const hasProgress = computed(
-  () => runtimeState.detected > 0 || runtimeState.answered > 0 || runtimeState.errors > 0,
-);
-
 function truncate(s: string, n: number): string {
   if (!s) return '';
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
 }
 
+function formatClock(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function formatRelative(ts: number | null): string {
+  if (!ts) return '';
+  const diff = Math.max(0, Date.now() - ts);
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + ' 分钟前';
+  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + ' 小时前';
+  return Math.floor(diff / 86_400_000) + ' 天前';
+}
+
+const lastSuccessText = computed(() =>
+  runtimeState.lastSuccessAt ? '✓ 最近成功 ' + formatRelative(runtimeState.lastSuccessAt) : '',
+);
+const lastSuccessTooltip = computed(() =>
+  runtimeState.lastSuccessAt ? new Date(runtimeState.lastSuccessAt).toLocaleString() : '',
+);
+
 // session
 const session = ref<Session | null>(loadSession());
 
-// pill 显示
+// pill
 const dotKind = computed<'on' | 'off' | 'err' | 'work'>(() => {
   if (runtimeState.status === 'error') return 'err';
   if (runtimeState.status === 'working') return 'work';
@@ -213,27 +290,106 @@ const dotKind = computed<'on' | 'off' | 'err' | 'work'>(() => {
 const pillLabel = computed(() => {
   if (runtimeState.status === 'error') return '出错';
   if (courseRunning.value) return `🚀 ${courseChaptersHandled.value} 节`;
+
+  // 优先看 sectionTriage：用户最想第一眼看到的就是"本节什么状态"
+  const t = runtimeState.sectionTriage;
+  if (t.state === 'all-ready') return `可答 ${t.readyLocal}/${t.total}`;
+  if (t.state === 'partial-pending') return `部分收录中 ${t.pending}`;
+  if (t.state === 'all-pending') return '整节收录中';
+  if (t.state === 'mixed' && runtimeState.status === 'working') {
+    return `${runtimeState.answered}/${runtimeState.detected}`;
+  }
+
   if (runtimeState.status === 'working') {
-    if (runtimeState.detected > 0) {
-      return `${runtimeState.answered}/${runtimeState.detected}`;
-    }
+    if (runtimeState.detected > 0) return `${runtimeState.answered}/${runtimeState.detected}`;
     return runtimeState.phase || '处理中';
   }
   if (!session.value) return '未激活';
   return runtimeState.message
     ? truncate(runtimeState.message, 12)
-    : (typeof window !== 'undefined' && window.location?.hostname?.split('.').slice(-2).join('.')) || 'ready';
+    : 'ready';
 });
 
-// course runner 状态（响应式 polling 一秒一次，避免 courseProgress 不是 reactive）
+const pillTitle = computed(
+  () =>
+    `Netclass Sidekick · ${session.value ? session.value.cardkey_preview : '未激活'} · ${runtimeState.message || ''}`,
+);
+
+interface TriageCopy {
+  title: string;
+  body: string;
+}
+const triageBanner = computed<TriageCopy | null>(() => {
+  const t = runtimeState.sectionTriage;
+  if (t.state === 'unknown' && t.total === 0) return null;
+  switch (t.state) {
+    case 'all-ready':
+      return {
+        title: '本节可立即完成',
+        body: `已命中全部 ${t.total} 题答案（本地 ${t.readyLocal} / 服务端命中 ${t.total - t.readyLocal}），正在或已完成填写。`,
+      };
+    case 'mixed':
+      return {
+        title: '部分本地命中，剩余正在联网查询',
+        body: `本地缓存已命中 ${t.readyLocal}/${t.total}，剩余 ${t.needsServer} 题会问服务端；命中或新收录将在下方日志中实时显示。`,
+      };
+    case 'partial-pending':
+      return {
+        title: '部分题目正在收录',
+        body: `已命中 ${t.readyLocal + (t.total - t.readyLocal - t.pending - t.errors)}/${t.total}，${t.pending} 题已提交服务端处理，通常几分钟后重进本节会自动答完。`,
+      };
+    case 'all-pending':
+      return {
+        title: '本节题目已全部提交收录',
+        body: '本次没有可直接填写的答案。服务端正在 OCR + 解题，稍后重新进入本节会自动答题。',
+      };
+    case 'unknown':
+    default:
+      return {
+        title: '正在联网查询答案',
+        body: `共 ${t.total} 题，未命中本地缓存；命中或新收录将在下方日志中实时显示。`,
+      };
+  }
+});
+
+// course runner
 const courseRunning = ref(courseProgress.active);
 const courseChaptersHandled = ref(courseProgress.chaptersHandled);
 if (typeof window !== 'undefined') {
-  setInterval(() => {
+  window.setInterval(() => {
     courseRunning.value = courseProgress.active;
     courseChaptersHandled.value = courseProgress.chaptersHandled;
   }, 1000);
 }
+
+// 控制台自动滚动 — 默认开启，wheel 上滚自动暂停（codex 第 7 条风险缓解）
+const autoScroll = ref(true);
+const consoleEl = ref<HTMLElement | null>(null);
+
+function onToggleAutoScroll() {
+  autoScroll.value = !autoScroll.value;
+  if (autoScroll.value) scrollConsoleToBottom();
+}
+function onConsoleWheel(e: WheelEvent) {
+  // 用户向上滚 → 暂停 autoScroll；滚到底部附近重新启用
+  const el = consoleEl.value;
+  if (!el) return;
+  const nearBottom = el.scrollHeight - el.clientHeight - el.scrollTop < 24;
+  if (e.deltaY < 0 && autoScroll.value) autoScroll.value = false;
+  else if (nearBottom && !autoScroll.value) autoScroll.value = true;
+}
+function scrollConsoleToBottom() {
+  const el = consoleEl.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+}
+watch(
+  () => runtimeState.logs.length,
+  () => {
+    if (!autoScroll.value) return;
+    nextTick(scrollConsoleToBottom);
+  },
+);
 
 // dialog
 const dialogOpen = ref(false);
@@ -265,13 +421,9 @@ async function onSubmit() {
     emit('session-change', next);
     dialogOpen.value = false;
   } catch (e: unknown) {
-    if (e instanceof ActivateException) {
-      errorMsg.value = e.detail.message;
-    } else if (e instanceof Error) {
-      errorMsg.value = e.message;
-    } else {
-      errorMsg.value = '未知错误';
-    }
+    if (e instanceof ActivateException) errorMsg.value = e.detail.message;
+    else if (e instanceof Error) errorMsg.value = e.message;
+    else errorMsg.value = '未知错误';
   } finally {
     submitting.value = false;
   }
@@ -292,7 +444,6 @@ function onToggleAutomation() {
 }
 
 function onStartCourse() {
-  // 启动前确保 automation 也开着
   if (!runtimeState.automationEnabled) setAutomationEnabled(true);
   requestStartCourse();
   courseRunning.value = true;
@@ -304,7 +455,7 @@ function onStopCourse() {
   courseRunning.value = false;
 }
 
-// drag —— pill 和 panel 共用
+// drag
 let dragStart: { x: number; y: number; px: number; py: number; moved: boolean } | null = null;
 
 function onDragStart(e: MouseEvent) {
@@ -340,7 +491,7 @@ function onDragEnd(e: MouseEvent) {
 </script>
 
 <style scoped>
-/* ---- 折叠态：左下角小药丸 ---- */
+/* ---- 折叠态 ---- */
 .ns-pill {
   position: fixed;
   z-index: 2147483646;
@@ -359,125 +510,192 @@ function onDragEnd(e: MouseEvent) {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   transition: background 0.15s;
 }
-.ns-pill:hover {
-  background: rgba(24, 96, 194, 1);
-}
+.ns-pill:hover { background: rgba(24, 96, 194, 1); }
 .ns-pill__dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #67c23a;
+  width: 10px; height: 10px; border-radius: 50%; background: #67c23a;
 }
-.ns-dot--on {
-  background: #67c23a;
-}
-.ns-dot--off {
-  background: #909399;
-}
-.ns-dot--work {
-  background: #f5d04e;
-  animation: ns-pulse 1.4s infinite;
-}
-.ns-dot--err {
-  background: #f56c6c;
-  animation: ns-pulse 1.2s infinite;
-}
+.ns-dot--on { background: #67c23a; }
+.ns-dot--off { background: #909399; }
+.ns-dot--work { background: #f5d04e; animation: ns-pulse 1.4s infinite; }
+.ns-dot--err { background: #f56c6c; animation: ns-pulse 1.2s infinite; }
 @keyframes ns-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
 }
-.ns-pill__label {
-  line-height: 1;
-}
+.ns-pill__label { line-height: 1; }
 
-/* ---- 展开态 ---- */
+/* ---- 展开态：宽度 320，高度上限 540 ---- */
 .ns-panel {
   position: fixed;
   z-index: 2147483646;
-  width: 280px;
+  width: 320px;
+  max-height: 540px;
+  display: flex;
+  flex-direction: column;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
   font-family: system-ui, sans-serif;
   font-size: 13px;
   user-select: none;
   color: #303133;
+  overflow: hidden;
 }
+
+/* Header */
 .ns-panel__header {
   background: #1f71e0;
   color: #fff;
   padding: 8px 12px;
-  border-radius: 8px 8px 0 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: move;
+  flex-shrink: 0;
 }
-.ns-panel__title {
-  font-size: 13px;
-  font-weight: 600;
+.ns-header__main { display: flex; align-items: center; gap: 8px; }
+.ns-panel__title { font-size: 13px; font-weight: 600; }
+.ns-status-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.2);
 }
-.ns-panel__minus {
-  cursor: pointer;
-  padding: 0 4px;
-  font-size: 14px;
+.ns-status-chip--idle { background: rgba(103, 194, 58, 0.85); }
+.ns-status-chip--working { background: rgba(245, 208, 78, 0.95); color: #5a4500; }
+.ns-status-chip--error { background: rgba(245, 108, 108, 0.95); }
+.ns-header__meta { display: flex; align-items: center; gap: 10px; }
+.ns-last-success {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.ns-panel__body {
+.ns-panel__minus { cursor: pointer; padding: 0 4px; font-size: 14px; }
+
+/* Triage banner */
+.ns-triage {
+  margin: 10px 12px 0;
   padding: 10px 12px;
+  border-radius: 6px;
+  border-left: 4px solid #909399;
+  background: #f4f4f5;
+  flex-shrink: 0;
 }
+.ns-triage--all-ready { border-left-color: #67c23a; background: #f0f9eb; }
+.ns-triage--mixed { border-left-color: #1f71e0; background: #ecf5ff; }
+.ns-triage--partial-pending { border-left-color: #e6a23c; background: #fdf6ec; }
+.ns-triage--all-pending { border-left-color: #1f71e0; background: #ecf5ff; }
+.ns-triage--unknown { border-left-color: #909399; background: #f4f4f5; }
+.ns-triage__title { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
+.ns-triage__body { font-size: 12px; color: #606266; margin: 0 0 6px 0; line-height: 1.5; }
+.ns-triage__counts { display: flex; gap: 6px; flex-wrap: wrap; }
+.ns-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ns-chip--ok { background: #f0f9eb; color: #67c23a; }
+.ns-chip--pending { background: #fdf6ec; color: #e6a23c; }
+.ns-chip--err { background: #fef0f0; color: #f56c6c; }
+
+/* 当前动作 */
+.ns-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid #ebeef5;
+  flex-shrink: 0;
+}
+.ns-current__label { color: #909399; flex-shrink: 0; }
+.ns-current__msg {
+  font-weight: 500;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 控制台 */
+.ns-console-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 220px;
+  border-bottom: 1px solid #ebeef5;
+}
+.ns-console-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  background: #fafafa;
+  font-size: 11px;
+  color: #909399;
+  flex-shrink: 0;
+}
+.ns-console-toggle {
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+  color: #606266;
+}
+.ns-console-toggle--paused { background: #fdf6ec; border-color: #e6a23c; color: #e6a23c; }
+.ns-console {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 12px 8px;
+  background: #1e1e1e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #d4d4d4;
+}
+.ns-console__empty { color: #6a737d; padding: 6px 0; font-style: italic; }
+.ns-log {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  line-height: 1.5;
+}
+.ns-log__ts { color: #6a737d; flex-shrink: 0; }
+.ns-log__text { word-break: break-word; }
+.ns-log--info .ns-log__text { color: #d4d4d4; }
+.ns-log--ok .ns-log__text { color: #7fc97f; }
+.ns-log--warn .ns-log__text { color: #f5d04e; }
+.ns-log--err .ns-log__text { color: #f56c6c; }
+
+/* 详细信息 */
+.ns-details {
+  flex-shrink: 0;
+  border-bottom: 1px solid #ebeef5;
+}
+.ns-details__head {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #909399;
+  cursor: pointer;
+  user-select: none;
+}
+.ns-details__head:hover { background: #f4f4f5; }
+.ns-details__body { padding: 4px 12px 8px; }
 .ns-row {
   display: flex;
   justify-content: space-between;
-  margin: 5px 0;
+  margin: 4px 0;
   align-items: center;
   font-size: 12px;
   gap: 8px;
 }
-.ns-row > span:first-child {
-  color: #606266;
-  flex-shrink: 0;
-}
-.ns-row > strong {
-  text-align: right;
-  word-break: break-all;
-}
-.ns-status {
-  font-weight: 600;
-}
-.ns-status--idle {
-  color: #67c23a;
-}
-.ns-status--working {
-  color: #1f71e0;
-}
-.ns-status--error {
-  color: #e04e4e;
-}
-.ns-phase {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  color: #606266;
-}
-.ns-message {
-  font-size: 11px;
-  color: #909399;
-  font-weight: normal;
-}
-.ns-badge {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 10px;
-  margin-left: 4px;
-}
-.ns-badge--pending {
-  background: #fdf6ec;
-  color: #e6a23c;
-}
-.ns-badge--err {
-  background: #fef0f0;
-  color: #f56c6c;
-}
+.ns-row > span:first-child { color: #606266; flex-shrink: 0; }
+.ns-row > strong { text-align: right; word-break: break-all; }
 .ns-toggle {
   padding: 2px 10px;
   border-radius: 10px;
@@ -488,19 +706,9 @@ function onDragEnd(e: MouseEvent) {
   font-size: 11px;
   font-weight: 600;
 }
-.ns-toggle--on {
-  background: #67c23a;
-  border-color: #67c23a;
-  color: #fff;
-}
-.ns-account {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-.ns-account--off {
-  color: #909399;
-  font-weight: normal;
-}
+.ns-toggle--on { background: #67c23a; border-color: #67c23a; color: #fff; }
+.ns-account { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.ns-account--off { color: #909399; font-weight: normal; }
 .ns-plan {
   display: inline-block;
   margin-left: 6px;
@@ -511,11 +719,15 @@ function onDragEnd(e: MouseEvent) {
   font-size: 11px;
   font-family: system-ui, sans-serif;
 }
+
+/* 操作 */
 .ns-actions {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  padding: 6px 12px;
+  flex-shrink: 0;
 }
+.ns-actions:last-child { padding-bottom: 10px; }
 .ns-actions button {
   flex: 1;
   padding: 6px;
@@ -526,26 +738,17 @@ function onDragEnd(e: MouseEvent) {
   font-size: 12px;
   color: #303133;
 }
-.ns-actions button:hover:not(:disabled) {
-  background: #e9e9eb;
-}
-.ns-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.ns-actions button:hover:not(:disabled) { background: #e9e9eb; }
+.ns-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ns-btn--primary {
   background: #1f71e0 !important;
   color: #fff !important;
   border-color: #1f71e0 !important;
 }
-.ns-btn--primary:hover:not(:disabled) {
-  background: #1860c2 !important;
-}
-.ns-btn--danger {
-  color: #e04e4e !important;
-}
+.ns-btn--primary:hover:not(:disabled) { background: #1860c2 !important; }
+.ns-btn--danger { color: #e04e4e !important; }
 
-/* ---- Modal ---- */
+/* Modal */
 .ns-modal {
   position: fixed;
   inset: 0;
@@ -571,21 +774,9 @@ function onDragEnd(e: MouseEvent) {
   justify-content: space-between;
   font-weight: 600;
 }
-.ns-modal__close {
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  color: #909399;
-}
-.ns-modal__close:hover {
-  color: #303133;
-}
-.ns-modal__body {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+.ns-modal__close { cursor: pointer; font-size: 18px; line-height: 1; color: #909399; }
+.ns-modal__close:hover { color: #303133; }
+.ns-modal__body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .ns-modal__footer {
   padding: 12px 16px;
   border-top: 1px solid #ebeef5;
@@ -602,22 +793,10 @@ function onDragEnd(e: MouseEvent) {
   font-size: 13px;
   color: #303133;
 }
-.ns-modal__footer button:hover:not(:disabled) {
-  background: #e9e9eb;
-}
-.ns-modal__footer button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.ns-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.ns-field span {
-  font-size: 12px;
-  color: #606266;
-}
+.ns-modal__footer button:hover:not(:disabled) { background: #e9e9eb; }
+.ns-modal__footer button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ns-field { display: flex; flex-direction: column; gap: 4px; }
+.ns-field span { font-size: 12px; color: #606266; }
 .ns-field input {
   padding: 6px 8px;
   border: 1px solid #dcdfe6;
@@ -628,21 +807,8 @@ function onDragEnd(e: MouseEvent) {
   color: #303133;
   background: #fff;
 }
-.ns-field input:focus {
-  border-color: #1f71e0;
-}
-.ns-field input:disabled {
-  background: #f4f4f5;
-  cursor: not-allowed;
-}
-.ns-error {
-  margin: 0;
-  color: #e04e4e;
-  font-size: 12px;
-}
-.ns-hint {
-  margin: 0;
-  color: #909399;
-  font-size: 12px;
-}
+.ns-field input:focus { border-color: #1f71e0; }
+.ns-field input:disabled { background: #f4f4f5; cursor: not-allowed; }
+.ns-error { margin: 0; color: #e04e4e; font-size: 12px; }
+.ns-hint { margin: 0; color: #909399; font-size: 12px; }
 </style>
