@@ -82,12 +82,21 @@ route.post('/', async (c) => {
   }
 
   const contextJson = body.context ? JSON.stringify(body.context) : null;
+
+  // needs_vision: 题干/选项含 null-LaTeX 的公式图且客户端上传了合成图 →
+  // drain worker 必须看图才能答，不能纯靠文字推理
+  const texSpansArr = body.tex_spans ?? [];
+  const hasBlindSpots = texSpansArr.some(
+    (t) => t.latex === null && t.image_idx !== null,
+  );
+  const needsVision = imageKey !== null && hasBlindSpots ? 1 : 0;
+
   const now = Math.floor(Date.now() / 1000);
 
   await c.env.DB.prepare(
     `INSERT OR IGNORE INTO pending_q
-       (id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, submitted_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+       (id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, submitted_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
   )
     .bind(
       serverHash,
@@ -99,6 +108,7 @@ route.post('/', async (c) => {
       imageKey,
       contextJson,
       5,
+      needsVision,
       jwt.sub,
       now,
     )

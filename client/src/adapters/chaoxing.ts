@@ -104,6 +104,23 @@ export function extractQuestionsFromChaoxing(
     });
   }
 
+  // 提取后质量审计：统计 null-LaTeX 依赖视觉的题占比
+  let blindCount = 0;
+  let nullLatexCount = 0;
+  for (const q of questions) {
+    const hasBlind = q.tex_spans.some(
+      (t) => t.latex === null && t.image_idx !== null,
+    );
+    if (hasBlind) blindCount++;
+    nullLatexCount += q.tex_spans.filter((t) => t.latex === null).length;
+  }
+  if (blindCount > 0 || nullLatexCount > 0) {
+    // eslint-disable-next-line no-console
+    console.info(
+      `[netclass-sidekick/chaoxing] 提取 ${questions.length} 题，${blindCount} 题含无 LaTeX 源的公式图（需 compose 合图），共 ${nullLatexCount} 个 null-LaTeX span`,
+    );
+  }
+
   return questions;
 }
 
@@ -165,6 +182,7 @@ function parseTiMu(timu: HTMLElement): ExtractedQuestion | null {
  *
  * LaTeX 提取：超星在 `<img class="ans-latex-moudle" data="%22y%27%20%3D%202x%22">` 里
  * 用 URL-encoded 字符串保存原始 LaTeX 源——直接 decode 即可，省去 vision。
+ * 防御：decodeURIComponent 失败时尝试原始 data 作为 fallback（部分旧版超星存未编码 LaTeX）。
  */
 function buildPlaceholderText(
   container: HTMLElement,
@@ -174,27 +192,13 @@ function buildPlaceholderText(
   // 先克隆，避免改原 DOM
   const clone = container.cloneNode(true) as HTMLElement;
 
-  // 清掉题号 label / "【单选题】" 这些 inner span 以便题干更干净（可选：保留以增加上下文）
-  // 这里保留，一致性更好；归一化交给 server 的 hash 前置步骤。
-
   const imgs = clone.querySelectorAll('img');
   imgs.forEach((img) => {
     const src = img.getAttribute('src') ?? img.getAttribute('data-original') ?? '';
     const idx = images.length;
     images.push(src);
 
-    // LaTeX 源：优先 data 属性（URL-encoded 双引号包裹）
-    let latex: string | null = null;
-    const rawData = img.getAttribute('data');
-    if (rawData) {
-      try {
-        const decoded = decodeURIComponent(rawData);
-        // 去掉外层双引号
-        latex = decoded.replace(/^"|"$/g, '') || null;
-      } catch {
-        latex = null;
-      }
-    }
+    const latex = extractImgLatex(img);
 
     const placeholder = `<<M${idx + 1}>>`;
     texSpans.push({ placeholder, latex, image_idx: idx });
@@ -204,6 +208,29 @@ function buildPlaceholderText(
   });
 
   return (clone.textContent ?? '').trim().replace(/\s+/g, ' ');
+}
+
+/** 从 <img> 的 data 属性提取 LaTeX 源。防御 URL-decode 失败 + 空值 */
+function extractImgLatex(img: HTMLImageElement): string | null {
+  const rawData = img.getAttribute('data');
+  if (!rawData) return null;
+
+  // 先尝 URL-decode（chaoxing 标准: %22y'%20%3D%202x%22）
+  try {
+    const decoded = decodeURIComponent(rawData);
+    const stripped = decoded.replace(/^"+|"+$/g, '').trim();
+    if (stripped) return stripped;
+  } catch {
+    // fall through to raw-data fallback
+  }
+
+  // decode 失败或结果为空 → data 可能存的是未编码的原始 LaTeX
+  const stripped = rawData.replace(/^"+|"+$/g, '').trim();
+  if (stripped && /[\\{}^_]/.test(stripped)) {
+    return stripped;
+  }
+
+  return null;
 }
 
 function extractOptions(
@@ -239,15 +266,7 @@ function extractOptions(
       const imgIdx = images.length;
       images.push(src);
 
-      let latex: string | null = null;
-      const rawData = img.getAttribute('data');
-      if (rawData) {
-        try {
-          latex = decodeURIComponent(rawData).replace(/^"|"$/g, '') || null;
-        } catch {
-          latex = null;
-        }
-      }
+      const latex = extractImgLatex(img);
 
       const placeholder = `<<M${imgIdx + 1}>>`;
       texSpans.push({ placeholder, latex, image_idx: imgIdx });

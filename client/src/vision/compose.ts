@@ -23,16 +23,35 @@ export async function composeQuestionImage(refs: ImgRef[]): Promise<Blob> {
   const stems = bitmaps.filter((b) => b.role === 'stem');
   const opts = bitmaps.filter((b) => b.role === 'option');
 
-  const stemWidth = stems.reduce((s, b) => s + b.bitmap.width + 20, 40);
-  const stemHeight = stems.length
-    ? Math.max(...stems.map((b) => b.bitmap.height))
+  // 放大太小公式图：chaoxing 部分公式图只有 20-60px 宽，drain 看不清
+  const MIN_IMG_W = 200;
+  const MIN_IMG_H = 60;
+  const scaleBitmap = (b: ImageBitmap): { bitmap: ImageBitmap; scale: number } => {
+    if (b.width >= MIN_IMG_W && b.height >= MIN_IMG_H) return { bitmap: b, scale: 1 };
+    const scale = Math.max(MIN_IMG_W / b.width, MIN_IMG_H / b.height);
+    const canvas = new OffscreenCanvas(Math.ceil(b.width * scale), Math.ceil(b.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return { bitmap: b, scale: 1 };
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(b, 0, 0, canvas.width, canvas.height);
+    return { bitmap: canvas.transferToImageBitmap(), scale };
+  };
+
+  const scaledStems = stems.map((s) => ({ ...s, ...scaleBitmap(s.bitmap) }));
+  const scaledOpts = opts.map((o) => ({ ...o, ...scaleBitmap(o.bitmap) }));
+
+  const stemWidth = scaledStems.reduce((s, b) => s + b.bitmap.width + 20, 40);
+  const stemHeight = scaledStems.length
+    ? Math.max(...scaledStems.map((b) => b.bitmap.height))
     : 0;
 
-  const optRowHeight = (b: { bitmap: ImageBitmap }) => Math.max(b.bitmap.height, 30) + 40;
-  const optHeight = opts.reduce((s, b) => s + optRowHeight(b), 0);
+  const optRowHeight = (b: { bitmap: ImageBitmap }) => Math.max(b.bitmap.height, 36) + 40;
+  const optHeight = scaledOpts.reduce((s, b) => s + optRowHeight(b), 0);
 
-  const canvasWidth = Math.max(stemWidth, 800);
-  const canvasHeight = Math.max(stemHeight + 80 + optHeight + 80, 200);
+  const PAD = 40;
+  const canvasWidth = Math.max(stemWidth + PAD * 2, 800);
+  const canvasHeight = Math.max(stemHeight + PAD * 2 + optHeight + PAD, 200);
 
   const canvas = new OffscreenCanvas(canvasWidth, canvasHeight);
   const ctx = canvas.getContext('2d');
@@ -41,30 +60,33 @@ export async function composeQuestionImage(refs: ImgRef[]): Promise<Blob> {
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
   ctx.fillStyle = '#000000';
-  ctx.font = 'bold 24px sans-serif';
+  ctx.font = 'bold 28px sans-serif';
 
   // 题干区（横排）
-  let x = 20;
-  stems.forEach((s) => {
-    ctx.drawImage(s.bitmap, x, 40);
+  let x = PAD;
+  scaledStems.forEach((s) => {
+    ctx.drawImage(s.bitmap, x, PAD);
     x += s.bitmap.width + 20;
   });
 
   // 分隔线
-  if (stems.length && opts.length) {
+  if (stems.length && scaledOpts.length) {
+    const lineY = stemHeight + PAD + 20;
     ctx.strokeStyle = '#CCCCCC';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(20, stemHeight + 60);
-    ctx.lineTo(canvasWidth - 20, stemHeight + 60);
+    ctx.moveTo(PAD, lineY);
+    ctx.lineTo(canvasWidth - PAD, lineY);
     ctx.stroke();
   }
 
-  // 选项区（纵排）
-  let y = stemHeight + 80;
-  opts.forEach((o, i) => {
+  // 选项区（纵排，左侧标签右侧图）
+  let y = stemHeight + PAD + 40;
+  scaledOpts.forEach((o, i) => {
     const label = o.label ?? String.fromCharCode(65 + i);
-    ctx.fillText(`${label}:`, 40, y + o.bitmap.height / 2 + 8);
-    ctx.drawImage(o.bitmap, 120, y);
+    const labelW = ctx.measureText(label + ':').width;
+    ctx.fillText(`${label}:`, PAD, y + o.bitmap.height / 2 + 10);
+    ctx.drawImage(o.bitmap, PAD + labelW + 16, y);
     y += optRowHeight(o);
   });
 

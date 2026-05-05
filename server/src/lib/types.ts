@@ -44,5 +44,6 @@ export interface PendingRow {
   priority: number;
   attempts: number;
   submitted_by: string | null;
+  needs_vision: number;
   created_at: number;
 }

@@ -15,7 +15,7 @@ route.get('/', async (c) => {
   const type = c.req.query('type');
 
   let sql =
-    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, created_at FROM pending_q WHERE 1=1';
+    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, created_at FROM pending_q WHERE 1=1';
   const args: Array<string> = [];
   if (platform) {
     sql += ' AND platform = ?';
@@ -55,6 +55,7 @@ route.get('/', async (c) => {
     context: r.context_json ? JSON.parse(r.context_json) : null,
     priority: r.priority,
     attempts: r.attempts,
+    needs_vision: r.needs_vision === 1,
     created_at: new Date(r.created_at * 1000).toISOString(),
   }));
 

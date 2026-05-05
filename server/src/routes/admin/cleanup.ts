@@ -63,7 +63,7 @@ route.post('/', async (c) => {
 
   // 拉所有候选
   const rows = await c.env.DB.prepare(
-    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, created_at FROM pending_q ORDER BY created_at ASC LIMIT ?',
+    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, created_at FROM pending_q ORDER BY created_at ASC LIMIT ?',
   )
     .bind(limit)
     .all<PendingRow>();
