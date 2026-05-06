@@ -10,9 +10,12 @@
 
 import { runFiller } from '../answer/filler';
 import { jumpNextChaoxingTask, type JumpResult } from '../time-padder/chaoxing-task';
-import { scanIframes } from './iframe-dispatch';
+import { startChaoxingMediaPadders } from '../time-padder/chaoxing-video';
+import { scanIframes, resolveWorkDoc } from './iframe-dispatch';
 import { runtimeState, patchRuntimeState } from './state';
 import { processBook, processPptReader } from './task-handlers';
+
+const COURSE_RUNNER_MEDIA_ENDED_KEY = 'course-runner-media-ended';
 
 export interface ChapterResult {
   status: 'completed' | 'at-end' | 'no-button' | 'video-pending' | 'no-tasks';
@@ -48,11 +51,28 @@ export async function runChapter(
   const tasks = metas.filter((m) => m.kind !== 'ignored');
 
   if (tasks.length === 0) {
-    patchRuntimeState({ message: '当前页未识别到任务点 iframe' });
-    return { status: 'no-tasks', handled: 0 };
+    patchRuntimeState({ message: '当前页未识别到任务点，自动跳下一节' });
+    await sleep(preJumpDelayMs);
+    const jump = await jumpNextChaoxingTask({
+      root: rootDoc,
+      settleDelaySec: 0,
+      popupRetryMs: 1500,
+    });
+    if (jump.status === 'jumped') return { status: 'completed', handled: 0, jump };
+    if (jump.status === 'at_end') {
+      patchRuntimeState({
+        status: 'idle',
+        phase: 'course-done',
+        message: '🎉 整门课走完',
+      });
+      return { status: 'at-end', handled: 0, jump };
+    }
+    patchRuntimeState({ message: '⚠ 找不到下一节按钮，停' });
+    return { status: 'no-button', handled: 0, jump };
   }
 
   let videoSeen = false;
+  let mediaJumpScheduled = false;
   let handled = 0;
 
   for (const m of tasks) {
@@ -69,10 +89,14 @@ export async function runChapter(
     try {
       switch (m.kind) {
         case 'work': {
-          const doc = m.iframe.contentDocument;
-          // course-runner 跑全课时自动提交（章节测验场景），让 chaoxing 真记录答案 + 批改
-          if (doc) await runFiller(doc, { autoSubmit: true });
-          handled++;
+          // resolveWorkDoc 等待 work 壳内层 api/work iframe 创建 + .TiMu 渲染（网慢防跳过）
+          const doc = await resolveWorkDoc(m.iframe);
+          if (doc) {
+            await runFiller(doc, { autoSubmit: true });
+            handled++;
+          } else {
+            console.warn('[course-runner] work iframe 内容加载超时，跳过');
+          }
           break;
         }
         case 'document-reader': {
@@ -89,8 +113,32 @@ export async function runChapter(
         }
         case 'video':
         case 'audio': {
-          // adapter 的 video padder 已自动播 + 播完触发 jumpNextChaoxingTask
-          // 这里只标记一下，让本函数末尾不再重复 jump
+          const doc = m.iframe.contentDocument;
+          if (doc) {
+            startChaoxingMediaPadders(doc, {
+              subscriptionKey: COURSE_RUNNER_MEDIA_ENDED_KEY,
+              onEnded: () => {
+                if (mediaJumpScheduled) return;
+                mediaJumpScheduled = true;
+                patchRuntimeState({ message: '视频/音频已播完，正在跳下一节' });
+                void jumpNextChaoxingTask({
+                  root: rootDoc,
+                  settleDelaySec: preJumpDelayMs / 1000,
+                  popupRetryMs: 1500,
+                }).then((jump) => {
+                  if (jump.status === 'at_end' || jump.status === 'no_button') {
+                    courseProgress.active = false;
+                  }
+                  patchRuntimeState({
+                    message:
+                      jump.status === 'jumped'
+                        ? `视频/音频完成，已跳下一节（${jump.buttonSelector}）`
+                        : `视频/音频完成，跳转结果：${jump.status}`,
+                  });
+                });
+              },
+            });
+          }
           videoSeen = true;
           handled++;
           break;
@@ -148,6 +196,7 @@ export interface RunCourseOptions extends RunChapterOptions {
 /** 全课循环进度计数。供 Panel 显示。 */
 export const courseProgress = {
   active: false,
+  running: false,
   chaptersHandled: 0,
   startedAt: 0,
 };
@@ -158,6 +207,7 @@ export function startCourseRunner(rootDoc: Document = document): void {
     return;
   }
   courseProgress.active = true;
+  courseProgress.running = false;
   courseProgress.chaptersHandled = 0;
   courseProgress.startedAt = Date.now();
   patchRuntimeState({
@@ -175,13 +225,24 @@ export function stopCourseRunner(): void {
 
 async function runChapterAndCount(rootDoc: Document): Promise<void> {
   if (!courseProgress.active) return;
-  const result = await runChapter(rootDoc);
-  courseProgress.chaptersHandled++;
-  patchRuntimeState({
-    message: `已过 ${courseProgress.chaptersHandled} 节`,
-  });
-  if (result.status === 'at-end' || result.status === 'no-button') {
-    courseProgress.active = false;
+  if (courseProgress.running) {
+    console.info('[course-runner] skip - chapter run already in flight');
+    return;
+  }
+  courseProgress.running = true;
+  try {
+    const result = await runChapter(rootDoc);
+    if (result.status !== 'video-pending' && result.status !== 'no-tasks') {
+      courseProgress.chaptersHandled++;
+      patchRuntimeState({
+        message: `已过 ${courseProgress.chaptersHandled} 节`,
+      });
+    }
+    if (result.status === 'at-end' || result.status === 'no-button') {
+      courseProgress.active = false;
+    }
+  } finally {
+    courseProgress.running = false;
   }
   void runtimeState; // 保活引用
 }

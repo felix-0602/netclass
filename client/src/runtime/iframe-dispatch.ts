@@ -38,7 +38,7 @@ export function classifyIframe(iframe: HTMLIFrameElement): IframeMetadata {
     kind = 'finished';
   } else if (src.includes('javascript:')) {
     kind = 'ignored';
-  } else if (src.includes('/api/work') || src.includes('/mooc-ans/api/work')) {
+  } else if (src.includes('/api/work') || src.includes('/mooc-ans/api/work') || src.includes('modules/work/')) {
     kind = 'work';
   } else if (src.includes('modules/video') || /\bvideo\b/.test(src)) {
     // 实测高数课 1.1：iframe id="mindmap" 也用 modules/video/index.html 作为壳，
@@ -79,6 +79,94 @@ export function scanIframes(rootDoc: Document): IframeMetadata[] {
   };
   visit(rootDoc);
   return out;
+}
+
+/**
+ * 解析 work iframe 的真实 contentDocument。
+ *
+ * 实测 2026-05 高数：work 壳 iframe（/ananas/modules/work/index.html）内层 api/work
+ * iframe 由 JS 动态创建，网速慢时 scanIframes 跑完它还没出现。
+ * 本函数自动识别 work 壳 vs 内层 api/work，等内层加载完毕再返回 doc。
+ *
+ * @returns 包含 .TiMu 的 document，或 null（超时/跨域）
+ */
+export async function resolveWorkDoc(
+  workFrame: HTMLIFrameElement,
+  timeoutMs = 15000,
+): Promise<Document | null> {
+  const src = workFrame.src || '';
+
+  // 直接是 api/work iframe — 等 .TiMu 出现
+  if (src.includes('/api/work') || src.includes('/mooc-ans/api/work')) {
+    return waitForTiMu(workFrame, timeoutMs);
+  }
+
+  // work 壳 iframe（/ananas/modules/work/）— 等内层 api/work iframe 出现
+  if (src.includes('modules/work/')) {
+    const innerDoc = await waitForInnerWorkFrame(workFrame, timeoutMs);
+    if (!innerDoc) return null;
+    return waitForTiMuInDoc(innerDoc, timeoutMs);
+  }
+
+  // fallback：直接在当前 doc 里等 .TiMu
+  try {
+    const doc = workFrame.contentDocument;
+    return doc ? await waitForTiMuInDoc(doc, timeoutMs) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForInnerWorkFrame(
+  shellFrame: HTMLIFrameElement,
+  timeoutMs: number,
+): Promise<Document | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const shellDoc = shellFrame.contentDocument;
+      if (!shellDoc) { await sleep(300); continue; }
+      const inner = shellDoc.querySelector<HTMLIFrameElement>(
+        'iframe[src*="/api/work"], iframe[src*="/mooc-ans/api/work"]',
+      );
+      if (inner) {
+        try { return inner.contentDocument; } catch { /* cross-origin */ }
+      }
+    } catch { /* cross-origin */ }
+    await sleep(300);
+  }
+  return null;
+}
+
+async function waitForTiMu(
+  frame: HTMLIFrameElement,
+  timeoutMs: number,
+): Promise<Document | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const doc = frame.contentDocument;
+      if (doc && doc.querySelector('.TiMu')) return doc;
+    } catch { return null; }
+    await sleep(200);
+  }
+  return null;
+}
+
+async function waitForTiMuInDoc(
+  doc: Document,
+  timeoutMs: number,
+): Promise<Document | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (doc.querySelector('.TiMu')) return doc;
+    await sleep(200);
+  }
+  return doc; // 超时也返回 doc，让调用方拿到后能报 "0 题" 而非 crash
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export interface IframeHandlers {

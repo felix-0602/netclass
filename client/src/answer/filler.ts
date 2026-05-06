@@ -20,6 +20,7 @@ import {
   runtimeState,
   setSectionTriage,
 } from '../runtime/state';
+import { resolveWorkDoc } from '../runtime/iframe-dispatch';
 import { readMarks, submitWork } from '../runtime/work-submit';
 import { blobToBase64, composeQuestionImage, type ImgRef } from '../vision/compose';
 import { cacheGet } from './cache';
@@ -302,8 +303,11 @@ export async function runFiller(
         if (sr.status === 'submitted') {
           patchRuntimeState({ message: '已提交，等待 chaoxing 批改…' });
           addRuntimeLog('ok', '已提交，等待 chaoxing 批改');
-          await sleep(4000); // 给 chaoxing 4s 渲染批改 marker
-          const marks = readMarks(rootDoc);
+          // 提交后 chaoxing 会 reload 内层 work iframe — rootDoc 变成 detached。
+          // 从 iframe 元素重新 resolve，等 .TiMu + 批改 marker 渲染完毕。
+          const frame = rootDoc.defaultView?.frameElement as HTMLIFrameElement | null;
+          const freshDoc = frame ? await resolveWorkDoc(frame, 12000) : null;
+          const marks = readMarks(freshDoc ?? frame ?? rootDoc);
           const correct = marks.filter((m) => m.correct === 'correct').length;
           const wrong = marks.filter((m) => m.correct === 'wrong').length;
           const unknown = marks.filter((m) => m.correct === 'unknown').length;

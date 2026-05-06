@@ -218,7 +218,12 @@ const WRONG_MARKERS = [
  * 提交后 chaoxing 会 reload work 页（or 部分 in-place 渲染 marker）— 调用方应在 submit
  * 完成 + 等待若干秒后调用本函数。
  */
-export function readMarks(workDoc: Document): QuestionMark[] {
+export function readMarks(workDocOrFrame: Document | HTMLIFrameElement): QuestionMark[] {
+  const workDoc: Document | null =
+    workDocOrFrame instanceof HTMLIFrameElement
+      ? (workDocOrFrame as HTMLIFrameElement).contentDocument
+      : workDocOrFrame;
+  if (!workDoc) return [];
   const out: QuestionMark[] = [];
   const timus = workDoc.querySelectorAll<HTMLElement>('.TiMu');
   for (const t of Array.from(timus)) {

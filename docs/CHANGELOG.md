@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+### v0.7.0-alpha — 四 bug 修复：iframe 时序 + 批改读取 + 多测验 + 空章节跳过 (2026-05-06)
+
+> Chrome 实况验证，确认四 bug 根因并修复。
+
+#### Fixed
+
+- **慢网速题目未加载完就跳过** — work 壳 iframe 内层 api/work 由 JS 动态创建；`scanIframes` 跑到时内层未就绪 → 0 题。修：`iframe-dispatch.ts` 新增 `resolveWorkDoc()`，等内层 iframe 创建 + `.TiMu` 渲染（最长 15s）。
+- **提交后批改全是 ?** — `readMarks()` 用的 doc 是提交前 capture 的，提交后 iframe reload → detached document。修：`filler.ts` 提交后从 `frameElement` 取 iframe → `resolveWorkDoc()` 重取刷新后的 doc。
+- **多测验只处理第一个** — 提交第一个 work 后 iframe 引用变 stale。修：`course-runner.ts` 每个 work 都用 `resolveWorkDoc()` 重新解析。
+- **无任务点时卡住** — `tasks.length === 0` 时直接返回 `no-tasks`，不跳下一节。修：改为调 `jumpNextChaoxingTask()` 自动跳转。
+
+#### Changed
+
+- `client/src/runtime/iframe-dispatch.ts` — `classifyIframe` 新增 `modules/work/` 匹配；新增 `resolveWorkDoc()` + 内层等待函数
+- `client/src/runtime/work-submit.ts` — `readMarks()` 参数改为 `Document | HTMLIFrameElement`
+- `client/src/answer/filler.ts` — 提交后用 `resolveWorkDoc()` 重取 doc 再读 marks
+- `client/src/runtime/course-runner.ts` — work case 用 `resolveWorkDoc`；no-tasks 时自动跳下一节
+
 ### Phase 0 W3v2 — hash v2（options 排序无关）+ cleanup criteria 修正 (2026-04-25)
 
 > 用户问"题库有去重吗"时发现两个潜在 bug，一起修：
