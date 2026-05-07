@@ -24,7 +24,7 @@ import { resolveWorkDoc } from '../runtime/iframe-dispatch';
 import { readMarks, submitWork } from '../runtime/work-submit';
 import { blobToBase64, composeQuestionImage, type ImgRef } from '../vision/compose';
 import { cacheGet } from './cache';
-import { getAnswer } from './client';
+import { getAnswer, reportVerifyResults } from './client';
 import { fillBlank } from './fill/blank';
 import { fillChoice } from './fill/choice';
 import { fillEssay } from './fill/essay';
@@ -315,6 +315,20 @@ export async function runFiller(
           patchRuntimeState({ phase: 'graded', message: gradeMsg });
           addRuntimeLog(wrong > 0 ? 'warn' : 'ok', gradeMsg);
           markSuccess();
+          // 回传批改结果给服务端：对题入库 / 错题进错题库
+          if (marks.length > 0 && hashes.length >= marks.length) {
+            const verifyItems: Array<{ hash: string; correct: boolean }> = [];
+            for (let j = 0; j < marks.length; j++) {
+              if (marks[j]!.correct !== 'unknown' && j < hashes.length) {
+                verifyItems.push({ hash: hashes[j]!, correct: marks[j]!.correct === 'correct' });
+              }
+            }
+            if (verifyItems.length > 0) {
+              void reportVerifyResults(verifyItems).then((result) => {
+                if (result) addRuntimeLog('info', `已回传 ${result.updated}/${verifyItems.length} 题批改结果`);
+              });
+            }
+          }
           console.info('[netclass-sidekick/filler] chaoxing marks:', marks.map((m) => ({
             input: m.inputName, correct: m.correct, evidence: m.evidence,
           })));

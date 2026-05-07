@@ -1,7 +1,7 @@
 # Netclass Sidekick — Protocol & Data Contracts
 
 > 三方（client / server / cc-worker）通信锁定在此。任何一方改接口，这份文档必须先改 + bump 版本 + 三方都改完才能合并。
-> 当前版本：**v1.0.0-alpha** (2026-04-24)
+> 当前版本：**v1.1.0-alpha** (2026-05-07)
 
 ## 1. 通用约定
 
@@ -237,7 +237,32 @@
 }
 ```
 
-### 3.3 `POST /admin/kill-switch`
+### 3.3 `POST /admin/verify-answer`
+
+客户端提交 chaoxing 后把批改结果回传给服务端。
+
+**鉴权**：`X-Admin-Key`（管理员） 或 `Authorization: Bearer <JWT>`（客户端登录态）
+
+**Request**：
+```json
+{ "hash": "<sha256>", "correct": true, "source?": "chaoxing_self_check" }
+```
+或批量：
+```json
+{ "items": [{ "hash": "<sha256>", "correct": false }, ...] }
+```
+
+**行为**：
+- `correct=true` → `questions.is_verified = 1`（留题库）
+- `correct=false` → `questions.is_verified = 0` + INSERT `wrong_answers` + confidence -0.2
+- 下次同一题 `/answer` 命中 `is_verified=0` → 自动调 DeepSeek 重答，旧错题记录入 `wrong_answers`
+
+**Response 200**：
+```json
+{ "updated": 5, "not_found": ["<hash>..."] }
+```
+
+### 3.4 `POST /admin/kill-switch`
 
 紧急关闭（比如被举报）。置全体客户端"维护模式"。
 
@@ -249,7 +274,7 @@
 }
 ```
 
-### 3.4 `GET /admin/metrics`
+### 3.5 `GET /admin/metrics`
 
 运营 dashboard 数据（Phase 1+）。
 
@@ -289,7 +314,8 @@ CREATE TABLE questions (
   answer_json    TEXT NOT NULL,              -- JSON: {"value": "D", "raw": ["D"]}
   confidence     REAL NOT NULL,              -- 0.0 - 1.0
   source         TEXT NOT NULL,              -- 'cc_drain' | 'user_contributed' | 'seed'
-  verified_by    TEXT,                       -- 'founder' | 'cross_check' | NULL
+  verified_by    TEXT,                       -- 'founder' | 'cross_check' | 'chaoxing_self_check' | NULL
+  is_verified    INTEGER,                    -- NULL=未验证, 1=正确(题库), 0=错误(需重答)
   hit_count      INTEGER NOT NULL DEFAULT 0,
   first_seen     INTEGER NOT NULL,           -- unix seconds
   last_hit       INTEGER,
@@ -298,6 +324,26 @@ CREATE TABLE questions (
 CREATE INDEX idx_q_course_sig ON questions(course_sig);
 CREATE INDEX idx_q_last_hit   ON questions(last_hit);
 CREATE INDEX idx_q_platform   ON questions(platform);
+
+-- 错题记录表 (v1.1.0-alpha)
+CREATE TABLE wrong_answers (
+  id             TEXT PRIMARY KEY,           -- UUID
+  question_hash  TEXT NOT NULL,              -- FK → questions.id
+  platform       TEXT NOT NULL,
+  q_type         TEXT NOT NULL,
+  text           TEXT NOT NULL,
+  options_json   TEXT,
+  tex_spans_json TEXT,
+  answer_json    TEXT NOT NULL,              -- 被判定为错的答案
+  confidence     REAL NOT NULL,
+  source         TEXT NOT NULL,              -- 'deepseek-api' | 'cc_drain' | 'user_contributed'
+  submitted_by   TEXT,                       -- users.id
+  reviewed       INTEGER NOT NULL DEFAULT 0, -- 0=待审, 1=已审
+  review_note    TEXT,
+  created_at     INTEGER NOT NULL
+);
+CREATE INDEX idx_wa_question_hash ON wrong_answers(question_hash);
+CREATE INDEX idx_wa_reviewed ON wrong_answers(reviewed);
 
 -- 待处理队列
 CREATE TABLE pending_q (

@@ -11,6 +11,7 @@ import { asR2Like, createDiskStorage, defaultStoragePath } from './lib/disk-stor
 export interface EnvOverrides {
   JWT_SECRET?: string;
   ADMIN_KEY?: string;
+  DEEPSEEK_API_KEY?: string;
   PROTOCOL_VERSION?: string;
   DB_PATH?: string; // ':memory:' 或文件路径
   PORT?: number;
@@ -31,6 +32,8 @@ export function createEnv(overrides: EnvOverrides = {}): RuntimeEnv {
     overrides.PROTOCOL_VERSION ?? process.env.PROTOCOL_VERSION ?? '1.0.0-alpha';
   const DB_PATH = overrides.DB_PATH ?? process.env.DB_PATH ?? './netclass.db';
   const PORT = overrides.PORT ?? Number(process.env.PORT ?? 8080);
+  const DEEPSEEK_API_KEY =
+    overrides.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? '';
 
   if (!JWT_SECRET && process.env.NODE_ENV !== 'test') {
     throw new Error('JWT_SECRET is required (set in .env or pass via overrides)');
@@ -58,6 +61,7 @@ export function createEnv(overrides: EnvOverrides = {}): RuntimeEnv {
     STORAGE_PUBLIC_BASE: process.env.STORAGE_PUBLIC_BASE,
     JWT_SECRET,
     ADMIN_KEY,
+    DEEPSEEK_API_KEY,
     PROTOCOL_VERSION,
     PORT,
   };
@@ -68,6 +72,7 @@ export function createTestEnv(overrides: EnvOverrides = {}): RuntimeEnv {
   return createEnv({
     JWT_SECRET: 'test-jwt-secret-0123456789abcdef0123456789abcdef',
     ADMIN_KEY: 'test-admin-key-0123456789abcdef',
+    DEEPSEEK_API_KEY: '',
     PROTOCOL_VERSION: '1.0.0-alpha',
     DB_PATH: ':memory:',
     ...overrides,

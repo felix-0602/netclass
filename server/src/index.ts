@@ -36,6 +36,8 @@ export interface Env {
   STORAGE_PUBLIC_BASE?: string;
   JWT_SECRET: string;
   ADMIN_KEY: string;
+  /** DeepSeek API key — 服务端实时作答，缓存未命中时自动调 */
+  DEEPSEEK_API_KEY: string;
   PROTOCOL_VERSION: string;
 }
 

@@ -26,6 +26,7 @@ export interface QuestionRow {
   confidence: number;
   source: string;
   verified_by: string | null;
+  is_verified: number | null;
   hit_count: number;
   first_seen: number;
   last_hit: number | null;

@@ -81,6 +81,24 @@ export async function getAnswer(req: AnswerRequest): Promise<AnswerResponse> {
   return resp;
 }
 
+/**
+ * 报告批改结果给服务端。
+ * autoSubmit + readMarks 之后调用，对题进题库 / 错题进错题库。
+ */
+export async function reportVerifyResults(
+  items: Array<{ hash: string; correct: boolean }>,
+): Promise<{ updated: number; not_found: string[] } | null> {
+  if (!CONFIG || items.length === 0) return null;
+  try {
+    return await postJson<{ updated: number; not_found: string[] }>(
+      '/admin/verify-answer',
+      { items },
+    );
+  } catch {
+    return null;
+  }
+}
+
 function postJson<T>(path: string, body: unknown): Promise<T> {
   if (!CONFIG) throw new Error('not_configured');
   const cfg = CONFIG;

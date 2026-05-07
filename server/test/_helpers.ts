@@ -30,6 +30,7 @@ export function createTestCtx(overrides: Partial<Env> = {}): TestCtx {
     STORAGE_PUBLIC_BASE: undefined,
     JWT_SECRET: 'test-jwt-secret-0123456789abcdef0123456789abcdef',
     ADMIN_KEY: 'test-admin-key-0123456789abcdef',
+    DEEPSEEK_API_KEY: '',
     PROTOCOL_VERSION: '1.0.0-alpha',
     rawDb,
     ...overrides,
