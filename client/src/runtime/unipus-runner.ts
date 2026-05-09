@@ -14,6 +14,7 @@
 
 import { runFiller } from '../answer/filler';
 import { jumpNextUnipusTask } from '../time-padder/unipus-task';
+import { startUnipusMediaPadders } from '../time-padder/unipus-video';
 import { patchRuntimeState } from './state';
 
 export interface UnipusChapterResult {
@@ -42,13 +43,24 @@ export async function runUnipusChapter(
   ).length > 0;
 
   if (hasQuestions) {
-    // 是 exercise 页 → 跑 filler
+    // 启动音频自动播放（后台播，用于刷时长）
+    const stopMedia = startUnipusMediaPadders(rootDoc, {
+      onEnded: () => {
+        patchRuntimeState({ message: 'U 校园：音频播完' });
+      },
+    });
+
+    // 跑 filler
     patchRuntimeState({
       phase: 'answer',
-      message: `U 校园：正在答题`,
+      message: 'U 校园：正在答题',
     });
     await runFiller(rootDoc);
     handled++;
+
+    // 音频让它继续播（刷时长），导航时自然会停
+    // 但在跳转前稍微等一下，给点时长积累
+    setTimeout(() => stopMedia(), 10000);
   } else {
     // 可能是 section 导航页（Before/While/After 的顶层）或 info 页
     // 尝试直接跳到第一个 exercise
