@@ -16,7 +16,7 @@
 
 import Database from 'better-sqlite3';
 import { createHash, randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const VALID_PLANS = ['trial', 'monthly', 'lifetime'] as const;
@@ -68,35 +68,34 @@ for (let i = 0; i < count; i++) {
 
 db.close();
 
-// 生成 Markdown 文档
-const today = new Date().toISOString().slice(0, 10);
-const lines = [
-  `# Netclass 卡密清单 — ${today}`,
-  '',
-  `- **数量**：${count} 张`,
-  `- **类型**：${PLAN_LABEL[plan as Plan]}`,
-  `- **生成时间**：${new Date().toISOString()}`,
-  '',
-  '| # | 卡密 | 类型 | 状态 |',
-  '|---|------|------|------|',
-  ...cards.map((c, i) => `| ${i + 1} | \`${c.cardkey}\` | ${PLAN_TAG[plan as Plan]} | 未激活 |`),
-  '',
-  '## 使用说明',
-  '',
-  '1. 复制卡密发给用户',
-  '2. 用户在 Tampermonkey 脚本设置面板粘贴卡密，点"激活卡密"',
-  '3. 每张卡密最多绑定 3 台设备',
-  plan === 'trial'
-    ? '4. 试用卡密从**首次激活**起算 7 天有效'
-    : plan === 'monthly'
-      ? '4. 月订卡密从**首次激活**起算 30 天有效'
-      : '4. 永久卡密无时间限制',
-  '',
-  '> 管理员操作：`npx tsx scripts/set-admin-plan.ts <卡密>` 可将指定卡密升级为 admin plan（无设备上限）。',
-];
+// 追加到固定文件（按 plan 分文件，不按日期）
+const outPath = join(process.cwd(), `cardkeys-${plan}.md`);
+const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-const outPath = join(process.cwd(), `cardkeys-${today}-${plan}.md`);
-writeFileSync(outPath, lines.join('\n'), 'utf8');
+const newSection = [
+  existsSync(outPath) ? '' : `# Netclass ${PLAN_TAG[plan as Plan]}卡密清单\n`,
+  `## ${timestamp} — ${count} 张`,
+  '',
+  '| # | 卡密 | 状态 |',
+  '|---|------|------|',
+  ...cards.map((c, i) => `| ${cards.length > 1 ? i + 1 : '-'} | \`${c.cardkey}\` | 未激活 |`),
+  '',
+].join('\n');
+
+if (existsSync(outPath)) {
+  appendFileSync(outPath, '\n' + newSection);
+} else {
+  const header = [
+    `# Netclass ${PLAN_TAG[plan as Plan]}卡密清单`,
+    '',
+    `> 类型：${PLAN_LABEL[plan as Plan]}`,
+    `> 激活起算，每张最多 3 台设备`,
+    '',
+    '---',
+    '',
+  ].join('\n');
+  writeFileSync(outPath, header + newSection);
+}
 
 console.log(`✅ 已生成 ${count} 张 ${PLAN_TAG[plan as Plan]}卡密 → ${outPath}`);
 for (const c of cards) {
