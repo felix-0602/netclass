@@ -36,7 +36,7 @@
 | `code` | HTTP | 触发 |
 |---|---|---|
 | `invalid_cardkey` | 401 | /auth 卡密错 |
-| `cardkey_expired` | 401 | 月订过期 |
+| `cardkey_expired` | 401 | 试用/月订过期 |
 | `device_limit` | 403 | 超 3 设备 |
 | `jwt_expired` | 401 | JWT 超时（client 应刷新） |
 | `rate_limited` | 429 | /answer 每分钟 >10 |
@@ -67,7 +67,7 @@
 {
   "jwt": "eyJhbGciOiJIUzI1NiIs...",
   "expires_at": "2026-05-01T00:00:00Z",
-  "plan": "monthly",
+  "plan": "trial | monthly | lifetime | admin",
   "month_exp": "2026-05-24T00:00:00Z",
   "features": {
     "free": ["time_padder", "task_jumper"],
@@ -366,9 +366,9 @@ CREATE INDEX idx_pq_priority ON pending_q(priority DESC, created_at ASC);
 CREATE TABLE users (
   id             TEXT PRIMARY KEY,
   cardkey_hash   TEXT NOT NULL UNIQUE,       -- sha256(cardkey 明文)
-  plan           TEXT NOT NULL,              -- 'monthly' | 'lifetime'
+  plan           TEXT NOT NULL,              -- 'trial' | 'monthly' | 'lifetime' | 'admin'
   bound_devices  TEXT,                       -- JSON array of fingerprints, max 3
-  monthly_exp    INTEGER,                    -- unix seconds，月订结束
+  monthly_exp    INTEGER,                    -- unix seconds; trial/monthly 首次激活时写入，过期后拒绝登录
   month_inference_cost_minutes INTEGER NOT NULL DEFAULT 0,  -- drain 消耗的 CC 分钟数（Phase 1 起用）
   month_reset_at INTEGER,
   is_banned      INTEGER NOT NULL DEFAULT 0,

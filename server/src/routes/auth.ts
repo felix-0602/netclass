@@ -25,7 +25,7 @@ route.post('/', async (c) => {
     .bind(cardkey_hash)
     .first<{
       id: string;
-      plan: 'monthly' | 'lifetime' | 'admin';
+      plan: 'trial' | 'monthly' | 'lifetime' | 'admin';
       bound_devices: string | null;
       monthly_exp: number | null;
       is_banned: number;
@@ -41,16 +41,27 @@ route.post('/', async (c) => {
     return c.json({ error: { code: 'banned', message: '卡密被封禁' } }, 403);
   }
 
-  // 过期检查（仅月订；admin/lifetime 跳）
   const nowSec = Math.floor(Date.now() / 1000);
-  if (user.plan === 'monthly' && user.monthly_exp && user.monthly_exp < nowSec) {
-    return c.json(
-      { error: { code: 'cardkey_expired', message: '月订已过期，请续费' } },
-      401,
-    );
+
+  // trial / monthly：首次激活时写入过期时间；非首次则检查是否过期
+  if (user.plan === 'trial' || user.plan === 'monthly') {
+    if (user.monthly_exp == null) {
+      const duration = user.plan === 'trial' ? 7 * 24 * 3600 : 30 * 24 * 3600;
+      const exp = nowSec + duration;
+      await c.env.DB.prepare('UPDATE users SET monthly_exp = ? WHERE id = ?')
+        .bind(exp, user.id)
+        .run();
+      user.monthly_exp = exp;
+    } else if (user.monthly_exp < nowSec) {
+      const label = user.plan === 'trial' ? '试用' : '月订';
+      return c.json(
+        { error: { code: 'cardkey_expired', message: `${label}已过期，请续费` } },
+        401,
+      );
+    }
   }
 
-  // 设备绑定 — admin plan 跳过设备数上限（开发者 / 自用），仍记录设备但不拒绝
+  // 设备绑定 — admin plan 跳过设备数上限
   const devices: string[] = user.bound_devices ? JSON.parse(user.bound_devices) : [];
   const DEVICE_LIMIT = 3;
   if (!devices.includes(device_fingerprint)) {
