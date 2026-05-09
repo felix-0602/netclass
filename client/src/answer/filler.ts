@@ -9,6 +9,7 @@
 // 本层不做 submit —— submit 的阈值判定留给 answer/submit.ts（Phase 1.W2 任务 1.13）。
 
 import { extractQuestionsFromChaoxing } from '../adapters/chaoxing';
+import { extractQuestionsFromUnipus, fillUnipusAnswer } from '../adapters/unipus';
 import type { ExtractedQuestion } from '../adapters/types';
 import {
   addRuntimeLog,
@@ -88,8 +89,13 @@ export async function runFiller(
   const restoreAlert = suppressAlerts(rootDoc);
 
   try {
-    // 1. 提取题目
-    const questions = extractQuestionsFromChaoxing(rootDoc).slice(
+    // 1. 提取题目 — 按平台选择提取器
+    const pageKind = getPageKindForFiller(rootDoc);
+    const allQuestions =
+      pageKind === 'unipus'
+        ? extractQuestionsFromUnipus(rootDoc)
+        : extractQuestionsFromChaoxing(rootDoc);
+    const questions = allQuestions.slice(
       0,
       Number.isFinite(maxQuestions) ? (maxQuestions as number) : undefined,
     );
@@ -387,13 +393,23 @@ function buildImgRefs(q: ExtractedQuestion): ImgRef[] {
   return refs;
 }
 
-/** 按题型派发到正确的 fill handler */
+/** 按题型 + 平台派发到正确的 fill handler */
 function fillQuestion(
   rootDoc: Document,
   q: ExtractedQuestion,
   answers: string[],
   opts: { useSimilarity: boolean },
 ): FillResult {
+  // U 校园：answer_target.answer_input_name 格式为 "unipus:<selector>"
+  if (q.platform === 'unipus') {
+    const result = fillUnipusAnswer(rootDoc, q.answer_target.answer_input_name ?? '', answers);
+    if (result.status === 'filled') {
+      return { status: 'filled' };
+    }
+    return { status: 'error', message: result.message ?? '填入失败' };
+  }
+
+  // 超星：通过 .TiMu 容器派发
   const timu = findTiMuByAnswerInputName(rootDoc, q.answer_target.answer_input_name);
   if (!timu) {
     return {
@@ -415,6 +431,15 @@ function fillQuestion(
     default:
       return { status: 'unsupported', message: `未知题型 ${q.type}` };
   }
+}
+
+/** 从当前 URL 判断平台，用于选择正确的题目提取器 */
+function getPageKindForFiller(rootDoc: Document): 'chaoxing' | 'unipus' {
+  try {
+    const host = rootDoc.location?.hostname ?? rootDoc.defaultView?.location?.hostname ?? '';
+    if (/ucontent\.unipus\.cn|uai\.unipus\.cn/.test(host)) return 'unipus';
+  } catch { /* cross-origin, default to chaoxing */ }
+  return 'chaoxing';
 }
 
 /** 按 hidden input name 反查 TiMu 容器（所有 fill handler 都吃 .TiMu） */
