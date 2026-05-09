@@ -58,7 +58,16 @@ for (const f of files) {
     console.log(`[migrate] ✅ 已应用: ${f}`);
     newCount++;
   } catch (err) {
-    console.error(`[migrate] ❌ 失败 ${f}:`, (err as Error).message);
+    const msg = (err as Error).message;
+    // SQLite 不支持 ADD COLUMN IF NOT EXISTS — "duplicate column" 说明 schema 已最新，安全跳过
+    if (msg.includes('duplicate column name') || msg.includes('already exists')) {
+      db.prepare('INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?)')
+        .run(f, Math.floor(Date.now() / 1000));
+      console.log(`[migrate] ⏭ 跳过（schema 已存在）: ${f}`);
+      newCount++;
+      continue;
+    }
+    console.error(`[migrate] ❌ 失败 ${f}:`, msg);
     db.close();
     process.exit(1);
   }

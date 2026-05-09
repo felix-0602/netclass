@@ -42,13 +42,4 @@ else
   exit 1
 fi
 
-echo "[5/5] 清掉所有用户的设备绑定（admin plan 不会被设备数限制，但仍清零防累积）..."
-# 直接走 sqlite — 不通过 HTTP，省去找 admin key
-DB_PATH="${NETCLASS_DB:-$(pwd)/netclass.db}"
-if [ -f "$DB_PATH" ]; then
-  N_BEFORE=$(sqlite3 "$DB_PATH" "SELECT COALESCE(SUM(json_array_length(bound_devices)),0) FROM users WHERE bound_devices IS NOT NULL")
-  sqlite3 "$DB_PATH" "UPDATE users SET bound_devices='[]' WHERE bound_devices IS NOT NULL AND bound_devices != '[]'"
-  echo "      清掉 $N_BEFORE 个设备绑定"
-else
-  echo "      ⚠ 找不到 $DB_PATH，跳过设备清零（手动检查 NETCLASS_DB env）"
-fi
+echo "[5/5] 设备绑定已保留（不再清零）"
