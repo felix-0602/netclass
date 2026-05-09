@@ -1,19 +1,21 @@
 // U 校园 adapter — 题目提取 + 答案填入
 //
-// 基于 2026-05-09 端到端浏览器实测 DOM 结构：
+// 基于 2026-05-09 端到端浏览器实测（Chrome headed + gstack browse）：
 //   - 主站 uai.unipus.cn：课程列表、作业列表、学习记录
 //   - 内容站 ucontent.unipus.cn：实际题目渲染
 //
-// 题目容器：.question-common-abs-question-container
-// 填空输入：.comp-abs-input > input
-// 音频元素：audio.unipus-audio-h5（CDN URL + hash 含 duration）
+// 实测 DOM 结构（Unit test 页）：
 //
-// 与超星关键差异：
-//   - 无 iframe 嵌套（SPA 同域）
-//   - 无字体混淆
-//   - 无数学公式图片（纯英语平台）
-//   - 有听力题（需 Whisper STT，Phase 2）
-//   - 一个 exercise 含多个填空 → 拆为多道 ExtractedQuestion
+//   选择题：.question-common-abs-reply > .question-common-abs-choice
+//     ├── .ques-title p          → 题号 "1."
+//     └── .option-wrap > .option → .caption (A/B/C/D) + .content (选项文本)
+//
+//   填空题：.question-common-abs-reply > .fill-blank-reply
+//     └── .item > .question-number + .comp-abs-input > input
+//
+//   音频：  audio.unipus-audio-h5 (CDN URL, duration 在 hash 里)
+//
+// 与超星差异：SPA 无 iframe、无字体混淆、无数学公式图、多个 question 在同一 reply 下
 
 import type { ExtractedQuestion } from './types';
 
@@ -46,8 +48,7 @@ function startActivitySimulator(rootDoc: Document) {
 
 /**
  * 从 U 校园页面提取所有题目。
- * 一个 exercise（.question-common-abs-question-container）可能含多个填空，
- * 每个填空拆成独立的 ExtractedQuestion。
+ * 通过 .question-common-abs-reply 的直接子元素判断题型并逐个解析。
  */
 export function extractQuestionsFromUnipus(
   root: Document | ShadowRoot = document,
@@ -56,107 +57,141 @@ export function extractQuestionsFromUnipus(
   const out: ExtractedQuestion[] = [];
 
   containers.forEach((container) => {
-    const questions = parseExerciseContainer(container as HTMLElement, out.length);
+    const questions = parseContainer(container as HTMLElement, out.length);
     out.push(...questions);
   });
 
   return out;
 }
 
-function parseExerciseContainer(
+function parseContainer(
   container: HTMLElement,
   startIdx: number,
 ): ExtractedQuestion[] {
-  // 提取 Direction
+  // Direction / 题目说明
   const directionEl = container.querySelector('.abs-direction .content');
   const directionText = directionEl?.textContent?.trim() ?? '';
 
-  // 提取音频 URL
+  // 音频 URL
   const audioEl = container.querySelector<HTMLAudioElement>('audio.unipus-audio-h5');
   const audioUrl = audioEl?.getAttribute('src')
     ?? audioEl?.querySelector('source')?.getAttribute('src')
     ?? undefined;
 
-  // 判断题型：填空 / 选择
+  // reply 区 — 所有题目都在这里
   const replyEl = container.querySelector('.question-common-abs-reply');
   if (!replyEl) return [];
 
-  const isFillBlank = !!replyEl.querySelector('.fill-blank-reply, .comp-abs-input');
-
   const questions: ExtractedQuestion[] = [];
 
-  if (isFillBlank) {
-    // 每个 input 拆成一道题
-    const inputs = replyEl.querySelectorAll<HTMLInputElement>(
-      '.comp-abs-input input, input[type="text"]:not([style*="display: none"])',
-    );
-    inputs.forEach((input, i) => {
-      const numEl = findPrevQuestionNumber(input);
-      const num = numEl?.textContent?.trim() ?? `${i + 1}`;
+  // 遍历 reply 的直接子元素 — 每个子元素是一道题
+  const items = replyEl.children;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i] as HTMLElement;
+    const cls = item.className;
 
-      // 从 input 周围提取题目文本
-      const rowText = extractRowText(input);
-
-      questions.push({
-        platform_id: makePlatformId(container, startIdx + i),
-        platform: 'unipus',
-        type: 'fill',
-        text: directionText
-          ? `[${directionText}] ${num}. ${rowText}`
-          : `${num}. ${rowText}`,
-        options: [],
-        tex_spans: [],
-        images: audioUrl ? [audioUrl] : [],
-        context: {},
-        answer_target: {
-          answer_input_name: `unipus:${selectorFor(input)}`,
-          answer_type_input_name: undefined,
-        },
-      });
-    });
-  } else {
-    // 选择题（暂无 fixture，按通用结构提取）
-    const choiceGroups = replyEl.querySelectorAll('.question-common-abs-scoop, [class*="choice-group"]');
-    choiceGroups.forEach((group, i) => {
-      const stem = group.querySelector('[class*="stem"], .component-htmlview')?.textContent?.trim() ?? '';
-      const optionEls = group.querySelectorAll('[class*="option"], .ant-radio, .ant-checkbox');
-      const options = Array.from(optionEls).map((opt) => {
-        const label = opt.getAttribute('data-label') ?? '';
-        const text = opt.textContent?.trim() ?? '';
-        return { label, text, image_ref: null as string | null };
-      });
-
-      questions.push({
-        platform_id: makePlatformId(container, startIdx + i),
-        platform: 'unipus',
-        type: options.length > 0 ? 'single' : 'fill',
-        text: stem.slice(0, 1000),
-        options,
-        tex_spans: [],
-        images: audioUrl ? [audioUrl] : [],
-        context: {},
-        answer_target: {
-          answer_input_name: `unipus:${startIdx + i}`,
-          answer_type_input_name: undefined,
-        },
-      });
-    });
+    if (cls.includes('question-common-abs-choice') || cls.includes('choice')) {
+      // ── 选择题 ──
+      const q = parseChoiceQuestion(item, container, startIdx + i, directionText, audioUrl);
+      if (q) questions.push(q);
+    } else if (cls.includes('fill-blank-reply') || cls.includes('comp-scoop-reply')) {
+      // ── 填空题 ──
+      const qs = parseFillBlankItem(item, container, startIdx + questions.length, directionText, audioUrl);
+      questions.push(...qs);
+    }
   }
 
   return questions;
 }
 
-/** 查找当前 input 前面的 question-number span */
-function findPrevQuestionNumber(input: HTMLInputElement): HTMLElement | null {
+/** 解析一道选择题 */
+function parseChoiceQuestion(
+  item: HTMLElement,
+  container: HTMLElement,
+  idx: number,
+  directionText: string,
+  audioUrl: string | undefined,
+): ExtractedQuestion | null {
+  const stemEl = item.querySelector('.ques-title');
+  const stem = stemEl?.textContent?.trim() ?? '';
+
+  const optionEls = item.querySelectorAll('.option');
+  const options: Array<{ label: string; text: string | null; image_ref: string | null }> = [];
+  const optionCaptions: string[] = [];
+
+  optionEls.forEach((opt) => {
+    const cap = opt.querySelector('.caption')?.textContent?.trim() ?? '';
+    const content = opt.querySelector('.content')?.textContent?.trim() ?? '';
+    optionCaptions.push(cap);
+    options.push({ label: cap, text: content, image_ref: null });
+  });
+
+  const text = directionText ? `[${directionText}] ${stem}` : stem;
+
+  // answer_target 存储 captions 数组，供 fill 阶段查找
+  return {
+    platform_id: makePlatformId(container, idx),
+    platform: 'unipus',
+    type: 'single',
+    text: text.slice(0, 1000),
+    options,
+    tex_spans: [],
+    images: audioUrl ? [audioUrl] : [],
+    context: {},
+    answer_target: {
+      answer_input_name: `unipus:choice:${idx}:${optionCaptions.join('|')}`,
+      answer_type_input_name: undefined,
+    },
+  };
+}
+
+/** 解析填空题 reply — 每个 .comp-abs-input input 是一道题 */
+function parseFillBlankItem(
+  item: HTMLElement,
+  container: HTMLElement,
+  startIdx: number,
+  directionText: string,
+  audioUrl: string | undefined,
+): ExtractedQuestion[] {
+  const questions: ExtractedQuestion[] = [];
+  const inputs = item.querySelectorAll<HTMLInputElement>('.comp-abs-input input, input[type="text"]');
+
+  inputs.forEach((input, i) => {
+    const numEl = findNearbyQuestionNumber(input);
+    const num = numEl?.textContent?.trim() ?? `${i + 1}`;
+    const rowText = extractRowContext(input);
+
+    questions.push({
+      platform_id: makePlatformId(container, startIdx + i),
+      platform: 'unipus',
+      type: 'fill',
+      text: directionText
+        ? `[${directionText}] ${num}. ${rowText}`
+        : `${num}. ${rowText}`,
+      options: [],
+      tex_spans: [],
+      images: audioUrl ? [audioUrl] : [],
+      context: {},
+      answer_target: {
+        answer_input_name: `unipus:fill:${startIdx + i}`,
+        answer_type_input_name: undefined,
+      },
+    });
+  });
+
+  return questions;
+}
+
+/** 查找 input 附近的 .question-number */
+function findNearbyQuestionNumber(input: HTMLInputElement): HTMLElement | null {
   let el: HTMLElement | null = input.parentElement;
-  for (let depth = 0; depth < 6 && el; depth++) {
+  for (let d = 0; d < 6 && el; d++) {
     const num = el.querySelector('.question-number');
     if (num) return num as HTMLElement;
-    // 也检查同级前面的元素
     let prev = el.previousElementSibling as HTMLElement | null;
     while (prev) {
-      const numInPrev = prev.querySelector?.('.question-number');
-      if (numInPrev) return numInPrev as HTMLElement;
+      const n = prev.querySelector?.('.question-number');
+      if (n) return n as HTMLElement;
       prev = prev.previousElementSibling as HTMLElement | null;
     }
     el = el.parentElement;
@@ -164,40 +199,30 @@ function findPrevQuestionNumber(input: HTMLInputElement): HTMLElement | null {
   return null;
 }
 
-/** 提取 input 所在行的上下文文本 */
-function extractRowText(input: HTMLInputElement): string {
-  // 从最近的父级 .item 或行容器提取
+/** 提取 input 所在行的文本上下文 */
+function extractRowContext(input: HTMLInputElement): string {
   const item = input.closest('.item');
   if (item) {
-    const htmlView = item.querySelector('.component-htmlview');
-    if (htmlView) return htmlView.textContent?.trim().slice(0, 300) ?? '';
-    return item.textContent?.trim().slice(0, 300) ?? '';
+    const hv = item.querySelector('.component-htmlview');
+    return (hv?.textContent ?? item.textContent ?? '').trim().slice(0, 300);
   }
-  // fallback: input 前面的兄弟文本
-  const parent = input.closest('td, div, .comp-abs-input');
-  if (parent) return parent.textContent?.replace(input.value, '').trim().slice(0, 200) ?? '';
-  return '';
+  const parent = input.closest('td, div');
+  return (parent?.textContent ?? '').replace(input.value, '').trim().slice(0, 200);
 }
 
 function makePlatformId(container: HTMLElement, idx: number): string {
-  const hash = container.getAttribute('data-id')
-    ?? container.getAttribute('id')
-    ?? `unipus-${idx}`;
-  return `${hash}-q${idx}`;
+  const id = container.getAttribute('data-id') ?? container.getAttribute('id') ?? `unipus-${idx}`;
+  return `${id}-q${idx}`;
 }
 
-function selectorFor(el: HTMLElement): string {
-  if (el.id) return `#${CSS.escape(el.id)}`;
-  const name = el.getAttribute('name');
-  if (name) return `input[name="${name.replace(/"/g, '\\"')}"]`;
-  const classes = Array.from(el.classList).map((c) => `.${CSS.escape(c)}`).join('');
-  if (classes) return classes;
-  return el.tagName.toLowerCase();
-}
+// ═══════════════════════════════════════════════
+// 答案填入
+// ═══════════════════════════════════════════════
 
 /**
- * 填入 U 校园答案。
- * answer_target.answer_input_name 格式为 "unipus:<selector>"
+ * answer_input_name 格式：
+ *   "unipus:choice:<idx>:<A|B|C|D>" — 选择题，caption 用 | 分隔
+ *   "unipus:fill:<idx>"            — 填空题，按索引找 input
  */
 export function fillUnipusAnswer(
   root: Document | ShadowRoot,
@@ -205,35 +230,67 @@ export function fillUnipusAnswer(
   answers: string[],
 ): { status: 'filled' | 'not_found'; message?: string } {
   if (!answerTargetName.startsWith('unipus:')) {
-    return { status: 'not_found', message: '非 U 校园格式的 answer_target' };
+    return { status: 'not_found', message: '非 U 校园格式' };
   }
 
-  const selector = answerTargetName.slice('unipus:'.length);
+  const parts = answerTargetName.slice('unipus:'.length).split(':');
+  const mode = parts[0];  // "choice" | "fill"
   const answer = answers[0];
   if (!answer) return { status: 'not_found', message: '没有答案' };
 
-  try {
-    const input = root.querySelector<HTMLInputElement>(selector);
-    if (!input) {
-      // 尝试更宽松的匹配
-      const allInputs = root.querySelectorAll<HTMLInputElement>(
-        '.comp-abs-input input, input[type="text"]',
-      );
-      const idx = parseInt(selector.replace(/\D/g, ''), 10);
-      if (!isNaN(idx) && idx < allInputs.length) {
-        setNativeValue(allInputs[idx]!, answer);
-        return { status: 'filled' };
-      }
-      return { status: 'not_found', message: `找不到 input: ${selector}` };
-    }
-    setNativeValue(input, answer);
-    return { status: 'filled' };
-  } catch (e) {
-    return { status: 'not_found', message: (e as Error).message };
+  if (mode === 'choice') {
+    return fillChoiceByCaption(root, parts.slice(2).join(':'), answer);
   }
+  if (mode === 'fill') {
+    const idx = parseInt(parts[1] ?? '0', 10);
+    return fillByIndex(root, idx, answer);
+  }
+  return { status: 'not_found', message: `未知模式: ${mode}` };
 }
 
-/** 原生 value setter 触发 React change 事件 */
+/** 选择题：根据 caption 找到对应的 .option 并点击 */
+function fillChoiceByCaption(
+  root: Document | ShadowRoot,
+  captionsStr: string,
+  answer: string,
+): { status: 'filled' | 'not_found'; message?: string } {
+  const captions = captionsStr.split('|');
+  // answer 可能是 "A" / "B" / "C" / "D" 或 "A,C"（多选）
+  const targetLabels = answer.split(',').map((s) => s.trim());
+
+  // 在所有 option 中找匹配的
+  const allOptions = root.querySelectorAll('.option');
+  let clicked = 0;
+
+  for (const opt of allOptions) {
+    const cap = opt.querySelector('.caption')?.textContent?.trim() ?? '';
+    if (targetLabels.includes(cap)) {
+      (opt as HTMLElement).click();
+      clicked++;
+    }
+  }
+
+  if (clicked > 0) {
+    return { status: 'filled' };
+  }
+  return { status: 'not_found', message: `找不到匹配选项: ${answer} (captions=${captionsStr})` };
+}
+
+/** 填空题：按序号找 input 并填入值 */
+function fillByIndex(
+  root: Document | ShadowRoot,
+  idx: number,
+  value: string,
+): { status: 'filled' | 'not_found'; message?: string } {
+  const inputs = root.querySelectorAll<HTMLInputElement>('.comp-abs-input input, input[type="text"]');
+  if (idx >= inputs.length) {
+    return { status: 'not_found', message: `input 索引越界: ${idx}/${inputs.length}` };
+  }
+  setNativeValue(inputs[idx]!, value);
+  return { status: 'filled' };
+}
+
+/** 原生 value setter + 事件派发，让 React 感知变化 */
 function setNativeValue(input: HTMLInputElement, value: string) {
   const nativeSetter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,

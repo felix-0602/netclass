@@ -8,6 +8,7 @@ import { runFiller } from './answer/filler';
 import {
   courseProgress,
   onUrlChangeWhileRunning,
+  pauseCourseRunner,
   runChapter,
   startCourseRunner,
   stopCourseRunner,
@@ -73,10 +74,10 @@ function boot() {
     manualScan: () => void scanCurrent(document, { force: true }),
     toggleAutomation: (enabled: boolean) => {
       console.info('[netclass-sidekick] automation:', enabled);
-      // automation 关掉时，主动停 course-runner 防它继续偷偷跳
       if (!enabled) stopCourseRunner();
     },
     startCourse: () => startCourseRunner(document),
+    pauseCourse: () => pauseCourseRunner(),
     stopCourse: () => stopCourseRunner(),
   });
 
