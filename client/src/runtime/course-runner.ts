@@ -14,6 +14,7 @@ import { startChaoxingMediaPadders } from '../time-padder/chaoxing-video';
 import { scanIframes, resolveWorkDoc } from './iframe-dispatch';
 import { runtimeState, patchRuntimeState } from './state';
 import { processBook, processPptReader } from './task-handlers';
+import { isUnipusContent, runUnipusChapter } from './unipus-runner';
 
 const COURSE_RUNNER_MEDIA_ENDED_KEY = 'course-runner-media-ended';
 
@@ -46,6 +47,14 @@ export async function runChapter(
   opts: RunChapterOptions = {},
 ): Promise<ChapterResult> {
   const { interTaskDelayMs = 1500, preJumpDelayMs = 3000 } = opts;
+
+  // U 校园：SPA 直跑，无 iframe
+  if (isUnipusContent(rootDoc)) {
+    const r = await runUnipusChapter(rootDoc);
+    if (r.status === 'completed') return { status: 'completed', handled: r.exercisesHandled };
+    if (r.status === 'no-more') return { status: 'at-end', handled: r.exercisesHandled };
+    return { status: 'no-tasks', handled: 0 };
+  }
 
   const metas = scanIframes(rootDoc);
   const tasks = metas.filter((m) => m.kind !== 'ignored');
@@ -196,35 +205,51 @@ export interface RunCourseOptions extends RunChapterOptions {
 /** 全课循环进度计数。供 Panel 显示。 */
 export const courseProgress = {
   active: false,
+  paused: false,
   running: false,
   chaptersHandled: 0,
   startedAt: 0,
 };
 
 export function startCourseRunner(rootDoc: Document = document): void {
-  if (courseProgress.active) {
+  if (courseProgress.active && !courseProgress.paused) {
     console.info('[course-runner] already active');
     return;
   }
-  courseProgress.active = true;
+  // 从暂停恢复：不清零计数器
+  if (courseProgress.paused) {
+    courseProgress.paused = false;
+    patchRuntimeState({ message: '全课代戉已继续' });
+  } else {
+    courseProgress.active = true;
+    courseProgress.paused = false;
+    courseProgress.chaptersHandled = 0;
+    courseProgress.startedAt = Date.now();
+    patchRuntimeState({
+      automationEnabled: true,
+      message: '全课代戉已启动',
+    });
+  }
   courseProgress.running = false;
-  courseProgress.chaptersHandled = 0;
-  courseProgress.startedAt = Date.now();
-  patchRuntimeState({
-    automationEnabled: true,
-    message: '全课代戉已启动',
-  });
-  // 立刻跑一次当前章节
   void runChapterAndCount(rootDoc);
+}
+
+export function pauseCourseRunner(): void {
+  if (!courseProgress.active || courseProgress.paused) return;
+  courseProgress.paused = true;
+  patchRuntimeState({ message: '全课代戉已暂停' });
 }
 
 export function stopCourseRunner(): void {
   courseProgress.active = false;
+  courseProgress.paused = false;
+  courseProgress.chaptersHandled = 0;
+  courseProgress.startedAt = 0;
   patchRuntimeState({ message: '全课代戉已停' });
 }
 
 async function runChapterAndCount(rootDoc: Document): Promise<void> {
-  if (!courseProgress.active) return;
+  if (!courseProgress.active || courseProgress.paused) return;
   if (courseProgress.running) {
     console.info('[course-runner] skip - chapter run already in flight');
     return;
@@ -249,7 +274,7 @@ async function runChapterAndCount(rootDoc: Document): Promise<void> {
 
 /** 给 main.ts 在 url-watcher 回调里调用 —— 自动接续下一节 */
 export function onUrlChangeWhileRunning(rootDoc: Document = document): void {
-  if (!courseProgress.active) return;
+  if (!courseProgress.active || courseProgress.paused) return;
   void runChapterAndCount(rootDoc);
 }
 

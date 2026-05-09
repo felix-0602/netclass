@@ -254,7 +254,6 @@ function fillChoiceByCaption(
   captionsStr: string,
   answer: string,
 ): { status: 'filled' | 'not_found'; message?: string } {
-  const captions = captionsStr.split('|');
   // answer 可能是 "A" / "B" / "C" / "D" 或 "A,C"（多选）
   const targetLabels = answer.split(',').map((s) => s.trim());
 
