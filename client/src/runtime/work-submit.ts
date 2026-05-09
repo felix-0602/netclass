@@ -9,6 +9,8 @@
 // 注意：本模块只做 chaoxing 工作 — server-side 验证回写由调用方做
 // （读完 markings → 调 /admin/verify-answer { hash, correct }）
 
+import { sleep } from '../lib/sleep';
+
 export type SubmitResult =
   | { status: 'submitted'; selector: string; redoPrompt?: string }
   | { status: 'no-button' }
@@ -183,7 +185,7 @@ function tryOverrideDialogs(win: Window): () => void {
 // ===== 批改结果读取 =====
 
 export interface QuestionMark {
-  /** TiMu 容器 */
+  /** 题目容器（可能为 ans-cc div，不一定是 .TiMu） */
   timu: HTMLElement;
   /** 服务端 hash 应当由调用方算（这里只给出 input name 供索引） */
   inputName: string | null;
@@ -193,16 +195,19 @@ export interface QuestionMark {
   evidence: string;
 }
 
-// chaoxing 批改 marker — 实测 2026-04 高数 1.1 章节测验已答题：
-//   容器: <div class="CorrectOrNot fl">
-//     对: <span class="marking_dui">  (duì = 对)
-//     错: <span class="marking_cuo">  (cuò = 错)
-// 旧版 chaoxing 用过 .zybcorrect/.zybwrong，留作 fallback
+// chaoxing 批改 marker — 覆盖三种版本：
+//   新版: .font_dui / .font_cuoti / .CycCorrect / .CycWrong
+//   标准: .marking_dui / .marking_cuo
+//   旧版: .zybcorrect / .zybwrong / .markCorrect / .markWrong
 const CORRECT_MARKERS = [
   '.CorrectOrNot .marking_dui',
   '.marking_dui',
   '.zybcorrect',
   '.markCorrect',
+  '.font_dui',
+  '.CycCorrect',
+  '.answerRight',
+  '.ans-ok',
 ];
 
 const WRONG_MARKERS = [
@@ -211,58 +216,108 @@ const WRONG_MARKERS = [
   '.zybwrong',
   '.markWrong',
   '.cuoti',
+  '.font_cuoti',
+  '.CycWrong',
+  '.answerWrong',
+  '.ans-err',
 ];
+
+/** 递归收集所有可访问的 Document（含嵌套同源 iframe） */
+function collectDocs(root: Document): Document[] {
+  const docs: Document[] = [root];
+  try {
+    root.querySelectorAll('iframe').forEach((f) => {
+      try {
+        const d = (f as HTMLIFrameElement).contentDocument;
+        if (d) docs.push(...collectDocs(d));
+      } catch { /* cross-origin */ }
+    });
+  } catch { /* DOM exception */ }
+  return docs;
+}
 
 /**
  * 读取作业 doc 里每道题的批改对错。
- * 提交后 chaoxing 会 reload work 页（or 部分 in-place 渲染 marker）— 调用方应在 submit
- * 完成 + 等待若干秒后调用本函数。
+ * 递归搜索所有嵌套 iframe，覆盖 .TiMu 答题视图和 ans-cc 批改视图。
  */
 export function readMarks(workDocOrFrame: Document | HTMLIFrameElement): QuestionMark[] {
-  const workDoc: Document | null =
+  const rootDoc: Document | null =
     workDocOrFrame instanceof HTMLIFrameElement
       ? (workDocOrFrame as HTMLIFrameElement).contentDocument
       : workDocOrFrame;
-  if (!workDoc) return [];
-  const out: QuestionMark[] = [];
-  const timus = workDoc.querySelectorAll<HTMLElement>('.TiMu');
-  for (const t of Array.from(timus)) {
-    const inputName = t.querySelector<HTMLInputElement>('input[name^="answer"]')?.name ?? null;
-    let correct: QuestionMark['correct'] = 'unknown';
-    let evidence = '';
+  if (!rootDoc) return [];
 
-    for (const sel of CORRECT_MARKERS) {
-      if (t.querySelector(sel)) {
-        correct = 'correct';
-        evidence = `correct:${sel}`;
-        break;
-      }
-    }
-    if (correct === 'unknown') {
-      for (const sel of WRONG_MARKERS) {
-        if (t.querySelector(sel)) {
-          correct = 'wrong';
-          evidence = `wrong:${sel}`;
+  // 递归收集所有嵌套 doc，在其中搜索题目和标记
+  const allDocs = collectDocs(rootDoc);
+  const out: QuestionMark[] = [];
+
+  // 在所有 doc 中找 TiMu 或 ans-cc 容器
+  for (const doc of allDocs) {
+    const containers = doc.querySelectorAll<HTMLElement>('.TiMu, .ans-cc');
+    for (const c of Array.from(containers)) {
+      // 跳过已处理的（多 doc 搜索可能重复）
+      if (out.some((m) => m.timu === c)) continue;
+
+      const inputName = c.querySelector<HTMLInputElement>('input[name^="answer"]')?.name ?? null;
+      let correct: QuestionMark['correct'] = 'unknown';
+      let evidence = '';
+
+      for (const sel of CORRECT_MARKERS) {
+        if (c.querySelector(sel)) {
+          correct = 'correct';
+          evidence = `correct:${sel}`;
           break;
         }
       }
-    }
-    // 兜底：看 .TiMu 自身 class
-    if (correct === 'unknown') {
-      if (t.classList.contains('cuoti') || t.classList.contains('answerWrong')) {
-        correct = 'wrong';
-        evidence = 'timu-class:wrong';
-      } else if (t.classList.contains('answerRight')) {
-        correct = 'correct';
-        evidence = 'timu-class:right';
+      if (correct === 'unknown') {
+        for (const sel of WRONG_MARKERS) {
+          if (c.querySelector(sel)) {
+            correct = 'wrong';
+            evidence = `wrong:${sel}`;
+            break;
+          }
+        }
       }
-    }
+      // 兜底：看容器自身 class
+      if (correct === 'unknown') {
+        if (c.classList.contains('cuoti') || c.classList.contains('answerWrong')) {
+          correct = 'wrong';
+          evidence = 'class:wrong';
+        } else if (c.classList.contains('answerRight')) {
+          correct = 'correct';
+          evidence = 'class:right';
+        }
+      }
+      // 最后兜底：读 aria-label
+      if (correct === 'unknown') {
+        const ariaEl = c.querySelector<HTMLElement>('[aria-label]');
+        const aria = ariaEl?.getAttribute('aria-label') ?? '';
+        if (/正确|correct|✓/.test(aria)) { correct = 'correct'; evidence = `aria:${aria.slice(0,20)}`; }
+        else if (/错误|wrong|✗/.test(aria)) { correct = 'wrong'; evidence = `aria:${aria.slice(0,20)}`; }
+      }
 
-    out.push({ timu: t, inputName, correct, evidence });
+      out.push({ timu: c, inputName, correct, evidence });
+    }
   }
+
   return out;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+/**
+ * 带重试的 readMarks：若全部 unknown，等 delayMs 后重试，最多 retries 次。
+ * 解决 ExtJS 批改视图异步渲染后 marker 尚未出现的问题。
+ */
+export async function readMarksWithRetry(
+  workDocOrFrame: Document | HTMLIFrameElement,
+  retries = 2,
+  delayMs = 800,
+): Promise<QuestionMark[]> {
+  let marks = readMarks(workDocOrFrame);
+  for (let i = 0; i < retries && marks.length > 0 && marks.every((m) => m.correct === 'unknown'); i++) {
+    await sleep(delayMs);
+    marks = readMarks(workDocOrFrame);
+  }
+  return marks;
 }
+
+

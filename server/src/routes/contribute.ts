@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../index';
 import { requireJwt } from '../lib/auth';
+import { hashQuestion } from '../lib/hash';
 import type { JwtPayload } from '../lib/jwt';
 
 const route = new Hono<{ Bindings: Env; Variables: { jwt: JwtPayload } }>();
@@ -13,7 +14,9 @@ route.post('/', async (c) => {
   const body = await c.req.json<{
     hash: string;
     text: string;
-    options: Array<{ label: string; text: string | null; image_ref: string | null }>;
+    type?: string;
+    options?: Array<{ label: string; text: string | null; image_ref: string | null }>;
+    tex_spans?: Array<{ placeholder: string; latex: string | null; image_idx: number | null }>;
     composite_image_b64?: string;
     answer: { value: string; raw: string[] };
     user_confidence: 'high' | 'medium' | 'low';
@@ -22,6 +25,20 @@ route.post('/', async (c) => {
 
   if (!body.hash || !body.answer) {
     return c.json({ error: { code: 'missing_fields', message: 'hash/answer 必填' } }, 400);
+  }
+
+  // 服务端重算 hash 与客户端提交对比，拒绝不匹配的
+  if (body.type && body.text) {
+    const serverHash = await hashQuestion({
+      platform: 'chaoxing',
+      type: body.type as 'single' | 'multi' | 'judge' | 'fill' | 'essay',
+      text: body.text,
+      options: body.options ?? [],
+      tex_spans: body.tex_spans ?? [],
+    });
+    if (body.hash !== serverHash) {
+      return c.json({ error: { code: 'hash_mismatch', message: 'hash 校验失败' } }, 400);
+    }
   }
 
   const jwt = c.get('jwt');

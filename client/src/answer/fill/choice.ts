@@ -113,7 +113,8 @@ export function fillChoice(
       try {
         hitLi.click();
       } catch {
-        // click 失败不致命：记作匹配，让上层决定重试
+        // click 失败不记 matched——DOM 未被修改，上层不应假定成功
+        continue;
       }
     }
     matched++;

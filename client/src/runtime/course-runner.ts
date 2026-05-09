@@ -15,6 +15,7 @@ import { scanIframes, resolveWorkDoc } from './iframe-dispatch';
 import { runtimeState, patchRuntimeState } from './state';
 import { processBook, processPptReader } from './task-handlers';
 import { isUnipusContent, runUnipusChapter } from './unipus-runner';
+import { sleep } from '../lib/sleep';
 
 const COURSE_RUNNER_MEDIA_ENDED_KEY = 'course-runner-media-ended';
 
@@ -124,31 +125,36 @@ export async function runChapter(
         case 'audio': {
           const doc = m.iframe.contentDocument;
           if (doc) {
-            startChaoxingMediaPadders(doc, {
-              subscriptionKey: COURSE_RUNNER_MEDIA_ENDED_KEY,
-              onEnded: () => {
-                if (mediaJumpScheduled) return;
-                mediaJumpScheduled = true;
-                patchRuntimeState({ message: '视频/音频已播完，正在跳下一节' });
-                void jumpNextChaoxingTask({
-                  root: rootDoc,
-                  settleDelaySec: preJumpDelayMs / 1000,
-                  popupRetryMs: 1500,
-                }).then((jump) => {
-                  if (jump.status === 'at_end' || jump.status === 'no_button') {
-                    courseProgress.active = false;
-                  }
-                  patchRuntimeState({
-                    message:
-                      jump.status === 'jumped'
-                        ? `视频/音频完成，已跳下一节（${jump.buttonSelector}）`
-                        : `视频/音频完成，跳转结果：${jump.status}`,
+            const hasMedia = doc.querySelectorAll('video, audio').length > 0;
+            if (hasMedia) {
+              startChaoxingMediaPadders(doc, {
+                subscriptionKey: COURSE_RUNNER_MEDIA_ENDED_KEY,
+                onEnded: () => {
+                  if (mediaJumpScheduled) return;
+                  mediaJumpScheduled = true;
+                  patchRuntimeState({ message: '视频/音频已播完，正在跳下一节' });
+                  jumpNextChaoxingTask({
+                    root: rootDoc,
+                    settleDelaySec: preJumpDelayMs / 1000,
+                    popupRetryMs: 1500,
+                  }).then((jump) => {
+                    if (jump.status === 'at_end' || jump.status === 'no_button') {
+                      courseProgress.active = false;
+                    }
+                    patchRuntimeState({
+                      message:
+                        jump.status === 'jumped'
+                          ? `视频/音频完成，已跳下一节（${jump.buttonSelector}）`
+                          : `视频/音频完成，跳转结果：${jump.status}`,
+                    });
+                  }).catch((e) => {
+                    console.warn('[course-runner] jumpNext after video failed:', e);
                   });
-                });
-              },
-            });
+                },
+              });
+              videoSeen = true;
+            }
           }
-          videoSeen = true;
           handled++;
           break;
         }
@@ -275,9 +281,8 @@ async function runChapterAndCount(rootDoc: Document): Promise<void> {
 /** 给 main.ts 在 url-watcher 回调里调用 —— 自动接续下一节 */
 export function onUrlChangeWhileRunning(rootDoc: Document = document): void {
   if (!courseProgress.active || courseProgress.paused) return;
-  void runChapterAndCount(rootDoc);
+  runChapterAndCount(rootDoc).catch((e) => {
+    console.warn('[course-runner] url-change chapter threw:', e);
+  });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}

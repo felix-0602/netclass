@@ -75,11 +75,10 @@ route.post('/', async (c) => {
     if (!row) { notFound.push(item.hash); continue; }
 
     const delta = item.correct ? 0.05 : -0.2;
-    const newConf = Math.max(0, Math.min(1, (row.confidence ?? 0.5) + delta));
     const isVerifiedValue = item.correct ? 1 : 0;
     const now = Math.floor(Date.now() / 1000);
 
-    // 错题 → 记录到 wrong_answers 审计表
+    // 错题 → 记录到 wrong_answers 审计表（UPDATE 前记，保存旧值）
     if (!item.correct) {
       const wrongId = crypto.randomUUID();
       try {
@@ -94,9 +93,13 @@ route.post('/', async (c) => {
       } catch { /* 非致命 */ }
     }
 
+    // 原子化 UPDATE 防止并发竞态
     await c.env.DB.prepare(
-      'UPDATE questions SET is_verified = ?, verified_by = ?, confidence = ? WHERE id = ?',
-    ).bind(isVerifiedValue, source, newConf, item.hash).run();
+      `UPDATE questions
+         SET is_verified = ?, verified_by = ?,
+             confidence = MAX(0, MIN(1, confidence + ?))
+       WHERE id = ?`,
+    ).bind(isVerifiedValue, source, delta, item.hash).run();
     updated++;
   }
 

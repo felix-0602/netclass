@@ -15,7 +15,7 @@ route.get('/', async (c) => {
   const type = c.req.query('type');
 
   let sql =
-    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, created_at FROM pending_q WHERE 1=1';
+    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, created_at FROM pending_q WHERE attempts < 3';
   const args: Array<string> = [];
   if (platform) {
     sql += ' AND platform = ?';

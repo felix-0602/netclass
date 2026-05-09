@@ -119,6 +119,30 @@
             </button>
           </strong>
         </div>
+        <div class="ns-row">
+          <span>处理主观题</span>
+          <strong>
+            <button
+              class="ns-toggle"
+              :class="{ 'ns-toggle--on': essayEnabled }"
+              @click="essayEnabled = !essayEnabled"
+            >
+              {{ essayEnabled ? 'ON' : 'OFF' }}
+            </button>
+          </strong>
+        </div>
+        <div class="ns-row">
+          <span>提交前询问</span>
+          <strong>
+            <button
+              class="ns-toggle"
+              :class="{ 'ns-toggle--on': askBeforeSubmit }"
+              @click="askBeforeSubmit = !askBeforeSubmit"
+            >
+              {{ askBeforeSubmit ? 'ON' : 'OFF' }}
+            </button>
+          </strong>
+        </div>
       </div>
     </div>
 
@@ -130,8 +154,9 @@
       <button @click="$emit('open-settings')">设置</button>
     </div>
     <div class="ns-actions">
+      <!-- 空闲/已停止 → 开始 -->
       <button
-        v-if="!courseRunning"
+        v-if="!courseActive && !coursePaused"
         class="ns-btn--primary"
         :disabled="!session"
         @click="onStartCourse"
@@ -139,9 +164,24 @@
       >
         🚀 全课代戉
       </button>
-      <button v-else class="ns-btn--danger" @click="onStopCourse">
-        ⏹ 停止全课（已过 {{ courseChaptersHandled }} 节）
+      <!-- 运行中 → 暂停 -->
+      <button
+        v-else-if="courseActive && !coursePaused"
+        class="ns-btn--warn"
+        @click="onPauseCourse"
+        :title="'暂停自动托管，保留进度'"
+      >
+        ⏸ 暂停（已过 {{ courseChaptersHandled }} 节）
       </button>
+      <!-- 已暂停 → 继续 / 停止 -->
+      <template v-else-if="coursePaused">
+        <button class="ns-btn--primary" @click="onStartCourse" title="从当前章节继续">
+          ▶ 继续（已过 {{ courseChaptersHandled }} 节）
+        </button>
+        <button class="ns-btn--danger" @click="onStopCourse" title="完全停止并重置进度">
+          ⏹ 停止
+        </button>
+      </template>
     </div>
     <div class="ns-actions">
       <button v-if="!session" class="ns-btn--primary" @click="openActivate">激活卡密</button>
@@ -204,6 +244,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { cacheStats as getCacheStats } from '@/answer/cache';
+import { userSettings } from '@/answer/settings';
 import {
   activate,
   ActivateException,
@@ -215,6 +256,7 @@ import {
 import {
   runtimeState,
   requestManualScan,
+  requestPauseCourse,
   requestStartCourse,
   requestStopCourse,
   setAutomationEnabled,
@@ -353,11 +395,15 @@ const triageBanner = computed<TriageCopy | null>(() => {
 });
 
 // course runner
-const courseRunning = ref(courseProgress.active);
+const courseActive = ref(courseProgress.active);
+const coursePaused = ref(courseProgress.paused);
+const courseRunning = ref(courseProgress.active && !courseProgress.paused);
 const courseChaptersHandled = ref(courseProgress.chaptersHandled);
 if (typeof window !== 'undefined') {
   window.setInterval(() => {
-    courseRunning.value = courseProgress.active;
+    courseActive.value = courseProgress.active;
+    coursePaused.value = courseProgress.paused;
+    courseRunning.value = courseProgress.active && !courseProgress.paused;
     courseChaptersHandled.value = courseProgress.chaptersHandled;
   }, 1000);
 }
@@ -443,16 +489,33 @@ function onToggleAutomation() {
   setAutomationEnabled(!runtimeState.automationEnabled);
 }
 
+// 用户偏好设置（响应式绑定 localStorage）
+const essayEnabled = ref(userSettings.essayEnabled);
+const askBeforeSubmit = ref(userSettings.askBeforeSubmit);
+watch(essayEnabled, (v) => { userSettings.essayEnabled = v; });
+watch(askBeforeSubmit, (v) => { userSettings.askBeforeSubmit = v; });
+
 function onStartCourse() {
   if (!runtimeState.automationEnabled) setAutomationEnabled(true);
   requestStartCourse();
+  courseActive.value = true;
+  coursePaused.value = false;
   courseRunning.value = true;
-  courseChaptersHandled.value = 0;
+  if (!courseProgress.paused) courseChaptersHandled.value = 0;
+}
+
+function onPauseCourse() {
+  requestPauseCourse();
+  coursePaused.value = true;
+  courseRunning.value = false;
 }
 
 function onStopCourse() {
   requestStopCourse();
+  courseActive.value = false;
+  coursePaused.value = false;
   courseRunning.value = false;
+  courseChaptersHandled.value = 0;
 }
 
 // drag
@@ -746,6 +809,12 @@ function onDragEnd(e: MouseEvent) {
   border-color: #1f71e0 !important;
 }
 .ns-btn--primary:hover:not(:disabled) { background: #1860c2 !important; }
+.ns-btn--warn {
+  background: #e6a23c !important;
+  color: #fff !important;
+  border-color: #e6a23c !important;
+}
+.ns-btn--warn:hover:not(:disabled) { background: #cf9236 !important; }
 .ns-btn--danger { color: #e04e4e !important; }
 
 /* Modal */

@@ -108,12 +108,24 @@ route.post('/', async (c) => {
   // ===== 缓存未命中 =====
 
   // 纯文本题 → 调 DeepSeek 实时作答
-  if (!hasBlindSpots && body.type !== 'essay') {
+  // essay 主观题：实时作答但不入库（防止题库污染）
+  // 其他题型：作答后入库供后续复用
+  if (!hasBlindSpots) {
     const dsResult = await callDeepSeek(
       { type: body.type, text: body.text, options: body.options, tex_spans: body.tex_spans },
       c.env.DEEPSEEK_API_KEY,
     );
     if (dsResult) {
+      // 主观题：直接返回，不存入 questions 表
+      if (body.type === 'essay') {
+        return c.json({
+          status: 'hit',
+          answer: dsResult,
+          source: 'deepseek-api',
+          updated_at: new Date().toISOString(),
+        });
+      }
+
       // 存合成图（如有）
       let imageKey: string | null = null;
       if (body.composite_image_b64 && c.env.STORAGE) {
@@ -129,7 +141,7 @@ route.post('/', async (c) => {
         `INSERT OR IGNORE INTO questions
            (id, platform, q_type, text, options_json, tex_spans_json, image_key, course_sig,
             answer_json, confidence, source, verified_by, hit_count, first_seen, created_at, is_verified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.85, 'deepseek-api', NULL, 0, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.85, 'deepseek-api', NULL, 1, ?, ?, NULL)`,
       ).bind(serverHash, body.platform, body.type, body.text,
         JSON.stringify(body.options), JSON.stringify(body.tex_spans),
         imageKey, courseSig, JSON.stringify(dsResult), now, now).run();
@@ -160,9 +172,13 @@ route.post('/', async (c) => {
   const now = Math.floor(Date.now() / 1000);
 
   await c.env.DB.prepare(
-    `INSERT OR IGNORE INTO pending_q
+    `INSERT INTO pending_q
        (id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, submitted_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       priority = MAX(priority, excluded.priority),
+       attempts = pending_q.attempts + 1,
+       submitted_by = excluded.submitted_by`,
   ).bind(serverHash, body.platform, body.type, body.text,
     JSON.stringify(body.options), JSON.stringify(body.tex_spans),
     imageKey, contextJson, 5, needsVision, jwt.sub, now).run();

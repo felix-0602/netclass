@@ -113,8 +113,11 @@ function boot() {
   );
 
   // 周期检测 chaoxing 弹窗（"未完成任务"等），自动放行 — 仅在 automation 开启时
-  setInterval(() => {
-    if (!runtimeState.automationEnabled) return;
+  const popupIntervalId = setInterval(() => {
+    if (!runtimeState.automationEnabled) {
+      clearInterval(popupIntervalId);
+      return;
+    }
     const r = detectAndConfirmPopup(document);
     if (r.status === 'confirmed') {
       console.info(`[netclass-sidekick] auto-confirmed popup (${r.container} → ${r.confirm})`);

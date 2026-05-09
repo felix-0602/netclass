@@ -8,6 +8,8 @@
 //   - modules/ppt|doc|pdf → 文档阅读
 //   - modules/innerbook   → 电子书
 //
+
+import { sleep } from '../lib/sleep';
 // 本模块只做**识别**，不做处理逻辑 —— 处理交给调用方（adapter/filler）。
 //
 // 用法：
@@ -165,9 +167,7 @@ async function waitForTiMuInDoc(
   return doc; // 超时也返回 doc，让调用方拿到后能报 "0 题" 而非 crash
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+
 
 export interface IframeHandlers {
   onWork?: (meta: IframeMetadata) => void | Promise<void>;

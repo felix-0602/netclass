@@ -2,6 +2,7 @@
 // 参考 app.js:5318-5342 watchIframe 尾部的"下一章节" 逻辑
 
 import { detectAndConfirmPopup } from '../runtime/popup-handler';
+import { sleep } from '../lib/sleep';
 
 export interface JumpNextOptions {
   /** 跳转前等待秒数，让超星自己的统计请求收尾 */
@@ -127,6 +128,4 @@ function sameIframeSrcs(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+

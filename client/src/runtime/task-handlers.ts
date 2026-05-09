@@ -8,6 +8,8 @@
 //
 // 所有 handler 是**幂等**的：完成态再调一次也不会出错（用于"扫一遍 + 跳下一节"循环里）。
 
+import { sleep } from '../lib/sleep';
+
 /**
  * PPT/PDF/DOC reader：滚到底 = 标记已读
  *
@@ -96,6 +98,4 @@ export function processFinished(): { ok: boolean } {
   return { ok: true };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+

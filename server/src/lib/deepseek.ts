@@ -18,13 +18,15 @@ export async function callDeepSeek(
   apiKey: string,
 ): Promise<AnswerValue | null> {
   if (!apiKey) return null;
-  if (input.type === 'essay') return null; // 主观题跳过
 
   const prompt = buildPrompt(input);
   if (!prompt) return null;
 
+  const isEssay = input.type === 'essay';
+  const maxTokens = isEssay ? 512 : 100;
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), isEssay ? 30_000 : API_TIMEOUT_MS);
 
   try {
     const res = await fetch(DEEPSEEK_API, {
@@ -40,7 +42,7 @@ export async function callDeepSeek(
           { role: 'user', content: prompt },
         ],
         temperature: 0,
-        max_tokens: 100,
+        max_tokens: maxTokens,
       }),
       signal: controller.signal,
     });
@@ -87,7 +89,9 @@ function buildPrompt(input: DeepSeekInput): string {
     case 'judge':
       return out + '\n请只回复"对"或"错"，不要解释。';
     case 'fill':
-      return out + '\n请只回复填空的答案文本，不要解释。';
+      return out + '\n请只回复填空题的答案。如果有多个空，用 || 分隔（如 答案1||答案2||答案3），不要解释。';
+    case 'essay':
+      return out + '\n请用中文作答，直接给出答案内容，不要标注"答案："等前缀，不要评价自己的回答。';
     default:
       return out;
   }
@@ -116,6 +120,14 @@ function parseAnswer(raw: string, type: string): AnswerValue | null {
     }
     case 'fill': {
       const clean = raw.replace(/^["'「『]|["'」』]$/g, '').trim();
+      if (!clean) return null;
+      // 多空分隔符 || → 每个 blank 各自一个 raw 元素
+      const parts = clean.split('||').map((p) => p.trim()).filter(Boolean);
+      if (parts.length === 0) return null;
+      return { value: clean, raw: parts };
+    }
+    case 'essay': {
+      const clean = raw.replace(/^(答案[：:]\s*|回答[：:]\s*)/i, '').trim();
       if (!clean) return null;
       return { value: clean, raw: [clean] };
     }

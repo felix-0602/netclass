@@ -4,6 +4,7 @@
 // 环境：source ~/.netclass-drain.env
 
 import { readFileSync } from "node:fs";
+import { parseAnswer } from "./lib/deepseek-parser.js";
 
 // ---- 加载 env ----
 function loadEnv(): { server: string; adminKey: string; apiKey: string } {
@@ -65,13 +66,33 @@ function decodeQuestion(q: PendingItem): string {
 // ---- 调 DeepSeek API ----
 async function askDeepSeek(
   question: string,
+  type: string,
   apiKey: string,
-): Promise<{ letter: string; raw: string } | null> {
-  const prompt = `你是一个高等数学助教。下面是一道单选题，请只回复正确答案的字母（A/B/C/D），不要解释。
+): Promise<{ value: string; raw: string[]; rawText: string } | null> {
+  let typeHint: string;
+  let systemPrompt: string;
+  if (type === 'multi') {
+    typeHint = '多选题，请只回复所有正确答案的字母，用逗号分隔（如 A,C），不要解释。';
+    systemPrompt = '你是一个简洁的高等数学助教。多选题只回复所有正确答案字母，用逗号分隔。';
+  } else if (type === 'judge') {
+    typeHint = '判断题，请只回复"对"或"错"，不要解释。';
+    systemPrompt = '你是一个简洁的高等数学助教。判断题只回复"对"或"错"。';
+  } else if (type === 'fill') {
+    typeHint = '填空题，请只回复填空的答案文本。如果有多个空，用 || 分隔（如 答案1||答案2||答案3），不要解释。';
+    systemPrompt = '你是一个简洁的高等数学助教。填空题只回复答案文本，多空用 || 分隔。';
+  } else {
+    typeHint = '单选题，请只回复正确答案的字母（A/B/C/D），不要解释。';
+    systemPrompt = '你是一个简洁的高等数学助教，只回复答案字母。';
+  }
+
+  const prompt = `你是一个高等数学助教。下面是一道${typeHint}
 
 ${question}
 
 答案：`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
 
   const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
     method: "POST",
@@ -82,13 +103,15 @@ ${question}
     body: JSON.stringify({
       model: "deepseek-chat",
       messages: [
-        { role: "system", content: "你是一个简洁的高等数学助教，只回复答案字母。" },
+        { role: "system", content: systemPrompt },
         { role: "user", content: prompt },
       ],
       temperature: 0,
-      max_tokens: 10,
+      max_tokens: 30,
     }),
+    signal: controller.signal,
   });
+  clearTimeout(timer);
 
   if (!res.ok) {
     console.error(`  DeepSeek API error ${res.status}: ${await res.text().then((t) => t.slice(0, 100))}`);
@@ -98,9 +121,10 @@ ${question}
   const json = (await res.json()) as {
     choices: Array<{ message: { content: string } }>;
   };
-  const raw = json.choices?.[0]?.message?.content?.trim() ?? "";
-  const letter = raw.match(/[A-D]/)?.[0] ?? "";
-  return { letter, raw };
+  const rawText = json.choices?.[0]?.message?.content?.trim() ?? "";
+  const parsed = parseAnswer(rawText, type);
+  if (!parsed) return null;
+  return { value: parsed.value, raw: parsed.raw, rawText };
 }
 
 // ---- 主流程 ----
@@ -148,26 +172,27 @@ async function main() {
   for (let i = 0; i < drainable.length; i++) {
     const q = drainable[i]!;
     const decoded = decodeQuestion(q);
-    console.log(`[${i + 1}/${drainable.length}] ${q.id.slice(0, 8)} — ${decoded.split("\n")[0]!.slice(0, 80)}`);
+    const qType = q.type ?? 'single';
+    console.log(`[${i + 1}/${drainable.length}] ${q.id.slice(0, 8)} [${qType}] — ${decoded.split("\n")[0]!.slice(0, 80)}`);
 
     if (dryRun) {
       console.log("  [dry-run] 跳过 API 调用\n");
       continue;
     }
 
-    const result = await askDeepSeek(decoded, env.apiKey);
-    if (!result || !result.letter) {
+    const result = await askDeepSeek(decoded, qType, env.apiKey);
+    if (!result || result.raw.length === 0) {
       console.log(`  ❌ API 返回无答案，跳过\n`);
       continue;
     }
 
-    console.log(`  → ${result.letter} (${result.raw.slice(0, 60)})\n`);
+    console.log(`  → ${result.value} (${result.rawText.slice(0, 60)})\n`);
     answers.push({
       id: q.id,
-      answer: { value: result.letter, raw: [result.letter] },
+      answer: { value: result.value, raw: result.raw },
       confidence: 0.95,
       source: "deepseek-api",
-      note: `DS: ${result.raw.slice(0, 40)}`,
+      note: `DS: ${result.rawText.slice(0, 40)}`,
     });
   }
 

@@ -3,6 +3,8 @@
 // U 校园跟超星的核心差异：
 //   - SPA 无 iframe，"下一节"不是按钮，而是 sidebar 里的下一个练习条目
 //   - ucontent.unipus.cn 页面顶部有 section tab（Before/While/After you xxx）
+
+import { sleep } from '../lib/sleep';
 //   - sidebar 树形展示当前 section 下的 exercises
 //   - 练习题答完即自动保存，不需要点"提交"
 //
@@ -146,6 +148,4 @@ function tryNextSection(doc: Document): UnipusJumpResult {
   return { status: 'section-done' };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
+

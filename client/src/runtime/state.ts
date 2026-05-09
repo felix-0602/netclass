@@ -68,6 +68,7 @@ export interface RuntimeActions {
   manualScan?: () => void;
   toggleAutomation?: (enabled: boolean) => void;
   startCourse?: () => void;
+  pauseCourse?: () => void;
   stopCourse?: () => void;
 }
 
@@ -166,6 +167,10 @@ export function setAutomationEnabled(enabled: boolean): void {
 
 export function requestStartCourse(): void {
   actions.startCourse?.();
+}
+
+export function requestPauseCourse(): void {
+  actions.pauseCourse?.();
 }
 
 export function requestStopCourse(): void {

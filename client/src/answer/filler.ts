@@ -22,10 +22,12 @@ import {
   setSectionTriage,
 } from '../runtime/state';
 import { resolveWorkDoc } from '../runtime/iframe-dispatch';
-import { readMarks, submitWork } from '../runtime/work-submit';
+import { readMarksWithRetry, submitWork } from '../runtime/work-submit';
+import { sleep } from '../lib/sleep';
 import { blobToBase64, composeQuestionImage, type ImgRef } from '../vision/compose';
 import { cacheGet } from './cache';
 import { getAnswer, reportVerifyResults } from './client';
+import { userSettings } from './settings';
 import { fillBlank } from './fill/blank';
 import { fillChoice } from './fill/choice';
 import { fillEssay } from './fill/essay';
@@ -115,11 +117,13 @@ export async function runFiller(
     // pre-hash + 本地 LRU triage：在打服务端前先告诉用户"本节里有几题已经能直接答"
     addRuntimeLog('info', `提取到 ${questions.length} 道题，正在分类（本地缓存命中 vs 待问服务端）`);
     const hashes: string[] = [];
+    const triageCache: Array<ReturnType<typeof cacheGet>> = []; // 缓存结果复用，避免主循环重复 I/O
     let readyLocal = 0;
     for (let i = 0; i < questions.length; i++) {
       const h = await hashQuestion(questions[i]!);
       hashes.push(h);
       const cached = cacheGet(h);
+      triageCache.push(cached);
       runtimeState.questions.push({
         index: i + 1,
         preview: truncate(questions[i]!.text, 36),
@@ -158,13 +162,22 @@ export async function runFiller(
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]!;
       const hash = hashes[i]!;
-      const cachedAtTriage = cacheGet(hash); // 之前 triage 阶段已查过；这里只是再拿一次引用
+      const cachedAtTriage = triageCache[i];
       patchRuntimeState({
         phase: `answer ${i + 1}/${questions.length}`,
         message: `第 ${i + 1}/${questions.length} 题：${truncate(q.text, 28)}`,
       });
 
       try {
+        // 主观题开关：关闭时跳过 essay
+        if (q.type === 'essay' && !userSettings.essayEnabled) {
+          summary.unsupported++;
+          recordQuestionOutcome(i, 'unsupported');
+          addRuntimeLog('info', `第 ${i + 1} 题主观题已跳过（设置关闭）`);
+          patchRuntimeState({ unsupported: summary.unsupported });
+          continue;
+        }
+
         // 数学题闭环：本地未命中 + 含图片公式 → 合图 + base64 一次性发上去
         // 已命中就跳过 compose（compose 慢，5-15s/题）
         let composite_image_b64: string | undefined;
@@ -287,7 +300,8 @@ export async function runFiller(
 
     // 4. autoSubmit：必须**全部题都答上**才提交。缺一道就跳过本节，避免提交不及格 +
     //    chaoxing 弹"未到及格线请重做"的二次门槛。少答的题留着，下次同 hash 命中就能完整答。
-    if (opts.autoSubmit) {
+    // 注意：actuallyFill=false（模拟运行）时不触发提交——没填答案，提交无意义。
+    if (opts.autoSubmit && actuallyFill) {
       const incomplete = summary.total - summary.answered;
       if (summary.answered === 0) {
         const msg = '暂不提交：本节还没有可填写答案。已记录题目状态，稍后重新进入本节再试';
@@ -301,7 +315,9 @@ export async function runFiller(
           `[netclass-sidekick/filler] skip submit: ${incomplete} unanswered (pending=${summary.pending} errors=${summary.errors} unsupported=${summary.unsupported})`,
         );
       } else {
-        const submitMsg = '题目已全部答完，正在提交到 chaoxing';
+        const submitMsg = userSettings.askBeforeSubmit
+          ? '题目已答完，等待确认提交…'
+          : '题目已全部答完，正在提交到 chaoxing';
         patchRuntimeState({ phase: 'submit', message: submitMsg });
         addRuntimeLog('info', submitMsg);
         markSubmit();
@@ -312,11 +328,22 @@ export async function runFiller(
           // 提交后 chaoxing 会 reload 内层 work iframe — rootDoc 变成 detached。
           // 从 iframe 元素重新 resolve，等 .TiMu + 批改 marker 渲染完毕。
           const frame = rootDoc.defaultView?.frameElement as HTMLIFrameElement | null;
-          const freshDoc = frame ? await resolveWorkDoc(frame, 12000) : null;
-          const marks = readMarks(freshDoc ?? frame ?? rootDoc);
+          const freshDoc = frame ? await resolveWorkDoc(frame, 20000) : null;
+          const targetDoc = freshDoc ?? (frame?.contentDocument ?? rootDoc);
+          const marks = await readMarksWithRetry(targetDoc, 3, 600);
           const correct = marks.filter((m) => m.correct === 'correct').length;
           const wrong = marks.filter((m) => m.correct === 'wrong').length;
           const unknown = marks.filter((m) => m.correct === 'unknown').length;
+          // 诊断：全部 unknown 时输出 DOM 快照便于定位问题
+          if (marks.length > 0 && unknown === marks.length) {
+            const sample = marks.slice(0, 3).map((m) => ({
+              tag: m.timu.tagName,
+              cls: m.timu.className?.slice(0, 80) || '(none)',
+              html: m.timu.outerHTML?.slice(0, 300),
+            }));
+            console.warn('[netclass-sidekick/filler] all marks unknown. DOM samples:', JSON.stringify(sample, null, 2));
+            addRuntimeLog('warn', `批改标记全部 unknown（${marks.length} 题），已输出诊断到 console`);
+          }
           const gradeMsg = `批改：✓${correct} ✗${wrong} ?${unknown}`;
           patchRuntimeState({ phase: 'graded', message: gradeMsg });
           addRuntimeLog(wrong > 0 ? 'warn' : 'ok', gradeMsg);
@@ -330,8 +357,10 @@ export async function runFiller(
               }
             }
             if (verifyItems.length > 0) {
-              void reportVerifyResults(verifyItems).then((result) => {
+              reportVerifyResults(verifyItems).then((result) => {
                 if (result) addRuntimeLog('info', `已回传 ${result.updated}/${verifyItems.length} 题批改结果`);
+              }).catch(() => {
+                addRuntimeLog('warn', '批改结果回传服务端失败');
               });
             }
           }
@@ -483,7 +512,10 @@ function suppressAlerts(rootDoc: Document): () => void {
   const origConfirm = win.confirm;
   try {
     win.alert = () => {};
-    win.confirm = () => true;
+    // 提交前询问模式：保留原生 confirm 让用户可以取消
+    if (!userSettings.askBeforeSubmit) {
+      win.confirm = () => true;
+    }
   } catch {
     return () => {};
   }
@@ -500,10 +532,6 @@ function suppressAlerts(rootDoc: Document): () => void {
 function truncate(s: string, n: number): string {
   if (!s) return '';
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function emptySummary(startedAt: number): FillRunSummary {
