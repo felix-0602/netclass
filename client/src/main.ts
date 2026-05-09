@@ -146,7 +146,16 @@ async function scanCurrent(
     return;
   }
 
+  const kind = currentPageKind();
+
   if (opts.force) {
+    // U 校园：SPA 无 iframe，直接在当前 doc 上跑 filler
+    if (kind === 'unipus-page') {
+      console.info('[netclass-sidekick] unipus manual scan — running filler directly');
+      await runFiller(rootDoc);
+      return;
+    }
+
     // 手动模式：只 dispatch，不 jump
     await dispatchIframes(rootDoc, {
       onWork: async (meta) => {
