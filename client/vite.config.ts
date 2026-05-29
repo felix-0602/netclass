@@ -1,11 +1,10 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
-import monkey, { cdn } from 'vite-plugin-monkey';
+import monkey from 'vite-plugin-monkey';
 import { fileURLToPath, URL } from 'node:url';
 
 // 构建产物：client/dist/netclass-sidekick.user.js
 // Dev 模式：vite serve + Tampermonkey 开发模式热重载
-
 export default defineConfig({
   resolve: {
     alias: {
@@ -55,24 +54,20 @@ export default defineConfig({
           'unsafeWindow',
         ],
         'run-at': 'document-start',
+        updateURL: 'http://182.254.180.181:8080/ota/script',
+        downloadURL: 'http://182.254.180.181:8080/ota/script',
         // 合规披露（参考原 app.js）
         // vite-plugin-monkey v5 期望对象数组：{ type, description, tag? }
         antifeature: [
           {
             type: 'cheating',
             description:
-              '提供超星/知到/U 校园的自动刷课与题库答题辅助。请依学校学术诚信规定使用。',
+              '提供超星/智慧树/U 校园的自动刷课与题库答题辅助。请依学校学术诚信规定使用。',
           },
         ],
       },
       build: {
         fileName: 'netclass-sidekick.user.js',
-        externalGlobals: {
-          // CDN 加载大依赖，缩小脚本体积
-          vue: cdn.jsdelivr('Vue', 'dist/vue.global.prod.js'),
-          'element-plus': cdn.jsdelivr('ElementPlus', 'dist/index.full.min.js'),
-          pinia: cdn.jsdelivr('Pinia', 'dist/pinia.iife.prod.js'),
-        },
       },
     }),
   ],

@@ -1,7 +1,7 @@
 # Netclass Sidekick — Protocol & Data Contracts
 
 > 三方（client / server / cc-worker）通信锁定在此。任何一方改接口，这份文档必须先改 + bump 版本 + 三方都改完才能合并。
-> 当前版本：**v1.1.0-alpha** (2026-05-07)
+> 当前版本：**v1.2.0-alpha** (2026-05-24)
 
 ## 1. 通用约定
 
@@ -293,6 +293,149 @@
     "questions_bank": 2340,
     "contributions_accepted": 180
   }
+}
+```
+
+### 3.6 `GET /admin/dashboard`
+
+返回自包含 HTML admin 管理后台页面。直接用浏览器访问。
+
+**鉴权**: 页面内 JS 会提示输入 `X-Admin-Key`，存在 `localStorage` 后续自动带。
+
+### 3.7 `GET /admin/api/stats`
+
+题库 + 用户概览。
+
+**Response 200**:
+```json
+{
+  "questions_total": 1749,
+  "questions_verified": 890,
+  "questions_wrong": 45,
+  "pending_count": 27,
+  "users_total": 7,
+  "hit_rate_24h": 0.72,
+  "confidence_distribution": { "low": 6, "mid": 14, "high": 1729 },
+  "platforms": { "chaoxing": 1749, "unipus": 0 },
+  "types": { "single": 1615, "judge": 70, "multi": 64 }
+}
+```
+
+### 3.8 `GET /admin/api/users?page=1&limit=20`
+
+用户列表。
+
+**Response 200**:
+```json
+{
+  "users": [
+    {
+      "id": "user-seed-0001",
+      "plan": "lifetime",
+      "device_count": 2,
+      "devices": ["<fp1>", "<fp2>"],
+      "monthly_exp": null,
+      "is_banned": false,
+      "created_at": "2026-04-20T08:00:00Z"
+    }
+  ],
+  "total": 7,
+  "page": 1,
+  "limit": 20
+}
+```
+
+### 3.9 `POST /admin/api/users/:id/toggle-ban`
+
+封禁/解封用户。
+
+**Response 200**:
+```json
+{ "id": "user-seed-0001", "is_banned": true }
+```
+
+### 3.10 `POST /admin/api/users/:id/unbind-all`
+
+清空某用户所有设备绑定。
+
+**Response 200**:
+```json
+{ "id": "user-seed-0001", "unbound": true }
+```
+
+### 3.11 `GET /admin/api/cardkeys?page=1&limit=20`
+
+卡密列表。
+
+**Response 200**:
+```json
+{
+  "cardkeys": [
+    {
+      "id": "user-seed-0001",
+      "plan": "lifetime",
+      "monthly_exp": null,
+      "is_banned": false,
+      "created_at": "2026-04-20T08:00:00Z"
+    }
+  ],
+  "total": 7
+}
+```
+
+### 3.12 `POST /admin/api/cardkeys/generate`
+
+生成新卡密。
+
+**Request**:
+```json
+{ "plan": "trial", "count": 5 }
+```
+
+- `plan`: `"trial"` (7天) | `"monthly"` (30天) | `"lifetime"` (永久)
+- `count`: 1-50，默认 1
+
+**Response 200**:
+```json
+{
+  "generated": ["NSK-ABCDEFGH", "NSK-JKLMNPQR"],
+  "plan": "trial",
+  "count": 2
+}
+```
+
+### 3.13 `POST /admin/api/cardkeys/:id/renew`
+
+续期 +30 天（trial/monthly 有效，lifetime 返回 400）。
+
+**Response 200**:
+```json
+{ "id": "user-xxx", "new_monthly_exp": "2026-06-23T00:00:00Z" }
+```
+
+### 3.14 `POST /admin/api/cardkeys/:id/revoke`
+
+作废卡密（`is_banned = 1`）。
+
+**Response 200**:
+```json
+{ "id": "user-xxx", "revoked": true }
+```
+
+### 3.15 `GET /admin/api/deepseek-usage`
+
+DeepSeek API 最近 30 天用量统计。
+
+**Response 200**:
+```json
+{
+  "this_month_calls": 456,
+  "this_month_accepted": 429,
+  "this_month_success_rate": 0.94,
+  "avg_latency_ms": 1200,
+  "daily": [
+    { "date": "2026-05-24", "calls": 20, "accepted": 19 }
+  ]
 }
 ```
 

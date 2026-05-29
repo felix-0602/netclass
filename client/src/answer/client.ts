@@ -8,7 +8,7 @@ export interface AnswerRequest {
   platform: 'chaoxing' | 'zhihuishu' | 'unipus';
   question_id?: string; // 平台内部 ID（超星有、U校园派生）
   hash: string; // sha256(normalized_text + image_key)，作为 D1 主键
-  type: 'single' | 'multi' | 'judge' | 'fill' | 'essay';
+  type: 'single' | 'multi' | 'judge' | 'fill' | 'essay' | 'cloze' | 'matching' | 'composite';
   text: string;
   options: Array<{ label: string; text: string | null; image_ref: string | null }>;
   tex_spans: Array<{ placeholder: string; latex: string | null; image_idx: number | null }>;
@@ -18,6 +18,8 @@ export interface AnswerRequest {
     clazz_id?: string;
     knowledge_id?: string;
     work_id?: string;
+    course_name?: string;
+    raw_question_type?: string;
   };
 }
 

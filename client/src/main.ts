@@ -156,7 +156,7 @@ async function scanCurrent(
     // U 校园：SPA 无 iframe，直接在当前 doc 上跑 filler
     if (kind === 'unipus-page') {
       console.info('[netclass-sidekick] unipus manual scan — running filler directly');
-      await runFiller(rootDoc);
+      await runFiller(rootDoc, { autoSubmit: true });
       return;
     }
 
@@ -168,7 +168,7 @@ async function scanCurrent(
         console.info(
           `[netclass-sidekick] runFiller on work iframe: ${meta.src.slice(0, 80)}`,
         );
-        await runFiller(doc);
+        await runFiller(doc, { autoSubmit: true });
       },
       onDocumentReader: async (meta) => {
         await processPptReader(meta.iframe);

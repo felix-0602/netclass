@@ -14,6 +14,11 @@ import adminUnbindRoute from './routes/admin/unbind-device';
 import adminImageRoute from './routes/admin/image';
 import adminCleanupRoute from './routes/admin/cleanup';
 import adminVerifyAnswerRoute from './routes/admin/verify-answer';
+import adminDashboardHtml from './routes/admin/dashboard.html';
+import adminApiStats from './routes/admin/api-stats';
+import adminApiUsers from './routes/admin/api-users';
+import adminApiCardkeys from './routes/admin/api-cardkeys';
+import adminApiDeepseek from './routes/admin/api-deepseek';
 import type { D1LikeDatabase } from './lib/db-sqlite-adapter';
 
 /**
@@ -69,6 +74,28 @@ app.get('/healthz', (c) =>
   }),
 );
 
+// OTA 用户脚本分发（直接读本地文件，无需 R2）
+app.get('/ota/script', async (c) => {
+  try {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const scriptPath = path.join(process.env.SCRIPTS_DIR ?? 'scripts', 'latest.user.js');
+    const content = fs.readFileSync(scriptPath, 'utf8');
+    return new Response(content, {
+      headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' },
+    });
+  } catch {
+    // fallback to R2 if available
+    if ((c.env as any).STORAGE) {
+      const obj = await (c.env as any).STORAGE.get('ota/latest.user.js');
+      if (obj) return new Response(obj.body, {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' },
+      });
+    }
+    return c.text('Script not available', 404);
+  }
+});
+
 // 用户路由
 app.route('/auth', authRoute);
 app.route('/answer', answerRoute);
@@ -82,6 +109,18 @@ app.route('/admin/unbind-device', adminUnbindRoute);
 app.route('/admin/image', adminImageRoute);
 app.route('/admin/cleanup-broken', adminCleanupRoute);
 app.route('/admin/verify-answer', adminVerifyAnswerRoute);
+
+// Admin Dashboard（HTML 页面 + API，全部需要 X-Admin-Key）
+import { requireAdmin } from './lib/auth';
+const adminApi = new Hono<{ Bindings: Env }>();
+adminApi.use('*', requireAdmin);
+adminApi.route('/stats', adminApiStats);
+adminApi.route('/users', adminApiUsers);
+adminApi.route('/cardkeys', adminApiCardkeys);
+adminApi.route('/deepseek-usage', adminApiDeepseek);
+
+app.get('/admin/dashboard', (c) => c.html(adminDashboardHtml));
+app.route('/admin/api', adminApi);
 
 // 404
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'No such route' } }, 404));

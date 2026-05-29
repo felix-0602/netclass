@@ -60,12 +60,19 @@ route.post('/', async (c) => {
   if (hit) {
     // 已知错题（is_verified === 0）且非看图题 → 调 DeepSeek 重答
     if (hit.is_verified === 0 && !hasBlindSpots) {
-      const dsResult = await callDeepSeek(
+      const { answer: dsAnswer, latencyMs } = await callDeepSeek(
         { type: body.type, text: body.text, options: body.options, tex_spans: body.tex_spans },
         c.env.DEEPSEEK_API_KEY,
+        true, // retry: 已知错题，重新作答
       );
-      if (dsResult) {
+      if (dsAnswer) {
         const now = Math.floor(Date.now() / 1000);
+        // 写入 inference_logs
+        c.executionCtx.waitUntil(
+          c.env.DB.prepare(
+            'INSERT INTO inference_logs (id, user_id, question_hash, model, latency_ms, accepted, ts) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ).bind(crypto.randomUUID(), jwt.sub, serverHash, 'deepseek-chat', latencyMs, 1, now).run(),
+        );
         // 记录旧错题到 wrong_answers
         const wrongId = crypto.randomUUID();
         await c.env.DB.prepare(
@@ -79,11 +86,11 @@ route.post('/', async (c) => {
         // 更新答案为 DeepSeek 新答案
         await c.env.DB.prepare(
           'UPDATE questions SET answer_json = ?, confidence = ?, source = ?, is_verified = NULL WHERE id = ?',
-        ).bind(JSON.stringify(dsResult), 0.85, 'deepseek-api', serverHash).run();
+        ).bind(JSON.stringify(dsAnswer), 0.85, 'deepseek-api', serverHash).run();
 
         return c.json({
           status: 'hit',
-          answer: dsResult,
+          answer: dsAnswer,
           source: 'deepseek-api',
           updated_at: new Date(now * 1000).toISOString(),
         });
@@ -111,16 +118,22 @@ route.post('/', async (c) => {
   // essay 主观题：实时作答但不入库（防止题库污染）
   // 其他题型：作答后入库供后续复用
   if (!hasBlindSpots) {
-    const dsResult = await callDeepSeek(
+    const { answer: dsAnswer, latencyMs } = await callDeepSeek(
       { type: body.type, text: body.text, options: body.options, tex_spans: body.tex_spans },
       c.env.DEEPSEEK_API_KEY,
     );
-    if (dsResult) {
+    if (dsAnswer) {
       // 主观题：直接返回，不存入 questions 表
       if (body.type === 'essay') {
+        // 写入 inference_logs
+        c.executionCtx.waitUntil(
+          c.env.DB.prepare(
+            'INSERT INTO inference_logs (id, user_id, question_hash, model, latency_ms, accepted, ts) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          ).bind(crypto.randomUUID(), jwt.sub, serverHash, 'deepseek-chat', latencyMs, 1, Math.floor(Date.now()/1000)).run(),
+        );
         return c.json({
           status: 'hit',
-          answer: dsResult,
+          answer: dsAnswer,
           source: 'deepseek-api',
           updated_at: new Date().toISOString(),
         });
@@ -137,6 +150,12 @@ route.post('/', async (c) => {
         ? `${body.context.course_id ?? ''}:${body.context.knowledge_id ?? ''}`
         : null;
       const now = Math.floor(Date.now() / 1000);
+      // 写入 inference_logs
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare(
+          'INSERT INTO inference_logs (id, user_id, question_hash, model, latency_ms, accepted, ts) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), jwt.sub, serverHash, 'deepseek-chat', latencyMs, 1, now).run(),
+      );
       await c.env.DB.prepare(
         `INSERT OR IGNORE INTO questions
            (id, platform, q_type, text, options_json, tex_spans_json, image_key, course_sig,
@@ -144,11 +163,11 @@ route.post('/', async (c) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.85, 'deepseek-api', NULL, 1, ?, ?, NULL)`,
       ).bind(serverHash, body.platform, body.type, body.text,
         JSON.stringify(body.options), JSON.stringify(body.tex_spans),
-        imageKey, courseSig, JSON.stringify(dsResult), now, now).run();
+        imageKey, courseSig, JSON.stringify(dsAnswer), now, now).run();
 
       return c.json({
         status: 'hit',
-        answer: dsResult,
+        answer: dsAnswer,
         source: 'deepseek-api',
         updated_at: new Date(now * 1000).toISOString(),
       });

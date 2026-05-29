@@ -1,6 +1,6 @@
 // 平台无关的题目数据模型。任何 adapter 提取出的题都归一到这里。
 
-export type QuestionType = 'single' | 'multi' | 'judge' | 'fill' | 'essay';
+export type QuestionType = 'single' | 'multi' | 'judge' | 'fill' | 'essay' | 'cloze' | 'matching' | 'composite';
 
 export interface TexSpan {
   /** 占位符，如 "<<M1>>"，插入在 text 和 options 里 */
@@ -34,6 +34,8 @@ export interface ExtractedQuestion {
     clazz_id?: string;
     knowledge_id?: string;
     work_id?: string;
+    course_name?: string;
+    raw_question_type?: string;
   };
   /** 指向 DOM 里的 answer input 元素，填答案时用 */
   answer_target: {

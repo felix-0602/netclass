@@ -20,7 +20,7 @@ VALUES (
 INSERT OR IGNORE INTO users (id, cardkey_hash, plan, monthly_exp, created_at)
 VALUES (
   'user-seed-0002',
-  '11111111111111111111111111111111111111111111111111111111111111', -- placeholder
+  '2b724e7751cd855afddb734c1eb4460215496bf3f5eff4ef5edd3799fd5e261d',
   'monthly',
   strftime('%s', 'now', '+30 days'),
   strftime('%s', 'now')

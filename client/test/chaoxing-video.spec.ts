@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { attachVideoPadder } from '../src/time-padder/chaoxing-video';
+import { attachVideoPadder, startChaoxingMediaPadders } from '../src/time-padder/chaoxing-video';
 
 function makeStubbedVideo(): HTMLVideoElement {
   const video = document.createElement('video');
@@ -122,5 +122,77 @@ describe('attachVideoPadder', () => {
     cleanup();
 
     expect(removeEventListenerSpy).toHaveBeenCalledWith('play', expect.any(Function));
+  });
+});
+
+describe('startChaoxingMediaPadders', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.useFakeTimers();
+  });
+
+  test('shares one padder while preserving every onEnded subscriber', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+    const first = vi.fn();
+    const second = vi.fn();
+
+    startChaoxingMediaPadders(document, { onEnded: first });
+    startChaoxingMediaPadders(document, { onEnded: second });
+
+    video.dispatchEvent(new Event('ended'));
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  test('cleanup removes only its own onEnded subscriber', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const cleanupFirst = startChaoxingMediaPadders(document, { onEnded: first });
+    startChaoxingMediaPadders(document, { onEnded: second });
+    cleanupFirst();
+
+    video.dispatchEvent(new Event('ended'));
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  test('replaces a keyed onEnded subscriber without accumulating callbacks', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+    const first = vi.fn();
+    const second = vi.fn();
+
+    startChaoxingMediaPadders(document, { subscriptionKey: 'runner', onEnded: first });
+    startChaoxingMediaPadders(document, { subscriptionKey: 'runner', onEnded: second });
+
+    video.dispatchEvent(new Event('ended'));
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  test('stale cleanup for a replaced keyed subscriber does not remove the latest one', () => {
+    const video = makeStubbedVideo();
+    document.body.appendChild(video);
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const cleanupFirst = startChaoxingMediaPadders(document, {
+      subscriptionKey: 'runner',
+      onEnded: first,
+    });
+    startChaoxingMediaPadders(document, { subscriptionKey: 'runner', onEnded: second });
+    cleanupFirst();
+
+    video.dispatchEvent(new Event('ended'));
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 });

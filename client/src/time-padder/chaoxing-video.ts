@@ -1,10 +1,23 @@
 export interface VideoPadderOptions {
   playbackRate?: number;
   mute?: boolean;
-  onEnded?: (video: HTMLVideoElement) => void;
+  onEnded?: (video: HTMLVideoElement | HTMLAudioElement) => void;
+  subscriptionKey?: string;
   resumeDelaySec?: number;
   respectUserPause?: boolean;
 }
+
+interface AttachedMedia {
+  cleanup: () => void;
+  endedHandlers: Set<NonNullable<VideoPadderOptions['onEnded']>>;
+  keyedEndedHandlers: Map<
+    string,
+    { handler: NonNullable<VideoPadderOptions['onEnded']>; token: object }
+  >;
+  refs: number;
+}
+
+const ATTACHED_MEDIA = new WeakMap<HTMLVideoElement | HTMLAudioElement, AttachedMedia>();
 
 export function attachVideoPadder(
   el: HTMLVideoElement | HTMLAudioElement,
@@ -64,7 +77,7 @@ export function attachVideoPadder(
       clearTimeout(pauseTimer);
       pauseTimer = null;
     }
-    onEnded?.(el as HTMLVideoElement);
+    onEnded?.(el);
   };
 
   el.addEventListener('play', onPlay);
@@ -88,7 +101,54 @@ export function startChaoxingMediaPadders(
   const elements = doc.querySelectorAll<HTMLVideoElement | HTMLAudioElement>('video, audio');
   const cleanups: Array<() => void> = [];
   elements.forEach((el) => {
-    cleanups.push(attachVideoPadder(el, opts));
+    let attached = ATTACHED_MEDIA.get(el);
+    if (!attached) {
+      const endedHandlers = new Set<NonNullable<VideoPadderOptions['onEnded']>>();
+      const cleanup = attachVideoPadder(el, {
+        ...opts,
+        onEnded: (media) => {
+          endedHandlers.forEach((handler) => handler(media));
+          attached?.keyedEndedHandlers.forEach(({ handler }) => handler(media));
+        },
+      });
+      attached = { cleanup, endedHandlers, keyedEndedHandlers: new Map(), refs: 0 };
+      ATTACHED_MEDIA.set(el, attached);
+    }
+
+    const onEnded = opts.onEnded;
+    const subscriptionKey = opts.subscriptionKey;
+    const token = {};
+    if (onEnded) {
+      if (subscriptionKey) {
+        if (!attached.keyedEndedHandlers.has(subscriptionKey)) {
+          attached.refs++;
+        }
+        attached.keyedEndedHandlers.set(subscriptionKey, { handler: onEnded, token });
+      } else {
+        attached.endedHandlers.add(onEnded);
+        attached.refs++;
+      }
+    }
+
+    const wrapped = () => {
+      let removedRef = false;
+      if (subscriptionKey) {
+        const registered = attached.keyedEndedHandlers.get(subscriptionKey);
+        if (registered?.token === token) {
+          attached.keyedEndedHandlers.delete(subscriptionKey);
+          removedRef = true;
+        }
+      } else if (onEnded) {
+        attached.endedHandlers.delete(onEnded);
+        removedRef = true;
+      }
+      if (removedRef) attached.refs--;
+      if (attached.refs === 0) {
+        attached.cleanup();
+        ATTACHED_MEDIA.delete(el);
+      }
+    };
+    cleanups.push(wrapped);
   });
   return () => cleanups.forEach((fn) => fn());
 }
