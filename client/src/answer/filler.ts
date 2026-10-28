@@ -41,6 +41,7 @@ export interface FillRunSummary {
   pending: number; // 服务端队列里
   errors: number;
   unsupported: number;
+  mathSkipped: number; // 数学公式题跳过数
   correctRate: number; // 0-100，answered/total*100
   durationMs: number;
 }
@@ -155,6 +156,7 @@ export async function runFiller(
       pending: 0,
       errors: 0,
       unsupported: 0,
+      mathSkipped: 0,
       correctRate: 0,
       durationMs: 0,
     };
@@ -169,6 +171,22 @@ export async function runFiller(
       });
 
       try {
+        // 数学公式盲区题跳过：填空/简答含图片公式（无 LaTeX 源码），AI 填空会产生乱码
+        if (hasBlindMathSpots(q)) {
+          summary.unsupported++;
+          summary.mathSkipped++;
+          recordQuestionOutcome(i, 'unsupported');
+          addRuntimeLog(
+            'warn',
+            `第 ${i + 1} 题跳过：数学公式（图片无 LaTeX 源码），AI 填空会产生乱码`,
+          );
+          patchRuntimeState({
+            unsupported: summary.unsupported,
+            mathSkipped: summary.mathSkipped,
+          });
+          continue;
+        }
+
         // 主观题开关：关闭时跳过 essay
         if (q.type === 'essay' && !userSettings.essayEnabled) {
           summary.unsupported++;
@@ -262,6 +280,7 @@ export async function runFiller(
         pending: summary.pending,
         errors: summary.errors,
         unsupported: summary.unsupported,
+        mathSkipped: summary.mathSkipped,
       });
 
       // 间隔延迟（除最后一题）
@@ -351,14 +370,21 @@ export async function runFiller(
           // 回传批改结果给服务端：对题入库 / 错题进错题库
           if (marks.length > 0 && hashes.length >= marks.length) {
             const verifyItems: Array<{ hash: string; correct: boolean }> = [];
+            const itemResults: string[] = [];
             for (let j = 0; j < marks.length; j++) {
               if (marks[j]!.correct !== 'unknown' && j < hashes.length) {
-                verifyItems.push({ hash: hashes[j]!, correct: marks[j]!.correct === 'correct' });
+                const isCorrect = marks[j]!.correct === 'correct';
+                verifyItems.push({ hash: hashes[j]!, correct: isCorrect });
+                itemResults.push(isCorrect ? '✓' : '✗');
+              } else {
+                itemResults.push('?');
               }
             }
             if (verifyItems.length > 0) {
               reportVerifyResults(verifyItems).then((result) => {
-                if (result) addRuntimeLog('info', `已回传 ${result.updated}/${verifyItems.length} 题批改结果`);
+                if (result) {
+                  addRuntimeLog('ok', `批改回写：${itemResults.join(' ')}  → 已回传 ${result.updated} 题`);
+                }
               }).catch(() => {
                 addRuntimeLog('warn', '批改结果回传服务端失败');
               });
@@ -389,6 +415,19 @@ function needsCompose(q: ExtractedQuestion): boolean {
   if (!q.images || q.images.length === 0) return false;
   // 至少有一个 tex_span 是"无 latex 源 + 有 image_idx"，意味着公式只能靠图识别
   return q.tex_spans.some((t) => t.latex === null && t.image_idx !== null);
+}
+
+/**
+ * 检测是否应跳过：填空/完形填空/简答含有 ≥2 个盲区公式（图片无 LaTeX 源码）。
+ * 这种情况 AI 硬填会产生乱码，应该跳过并告知用户原因。
+ */
+function hasBlindMathSpots(q: ExtractedQuestion): boolean {
+  if (!q.tex_spans || q.tex_spans.length === 0) return false;
+  if (q.type !== 'fill' && q.type !== 'cloze' && q.type !== 'essay') return false;
+  const blindCount = q.tex_spans.filter(
+    (t) => t.latex === null && t.image_idx !== null,
+  ).length;
+  return blindCount >= 2;
 }
 
 /** 把题目里所有公式图按 stem/option 角色组织成 ImgRef[]，调 vision/compose 合一张 */
@@ -541,6 +580,7 @@ function emptySummary(startedAt: number): FillRunSummary {
     pending: 0,
     errors: 0,
     unsupported: 0,
+    mathSkipped: 0,
     correctRate: 0,
     durationMs: Date.now() - startedAt,
   };

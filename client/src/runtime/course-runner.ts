@@ -9,6 +9,7 @@
 //   - 直到 jumpNext 返回 at_end / no_button → loop 自停
 
 import { runFiller } from '../answer/filler';
+import { userSettings } from '../answer/settings';
 import { jumpNextChaoxingTask, type JumpResult } from '../time-padder/chaoxing-task';
 import { startChaoxingMediaPadders } from '../time-padder/chaoxing-video';
 import { scanIframes, resolveWorkDoc } from './iframe-dispatch';
@@ -43,9 +44,29 @@ export interface RunChapterOptions {
  *
  * 走完后，若没有 video（video 自动会 jump），主动 jumpNextChaoxingTask。
  */
+// 实例互斥：卡片切换/URL 变化会连续触发多个 runChapter，若不互斥，
+// 空扫描实例会在 work 重试等待期间点"下一节"跳走，测验闭环直接断裂。
+let chapterRunBusy = false;
+
 export async function runChapter(
   rootDoc: Document = document,
   opts: RunChapterOptions = {},
+): Promise<ChapterResult> {
+  if (chapterRunBusy) {
+    console.info('[course-runner] runChapter busy — skip duplicate invocation');
+    return { status: 'no-tasks', handled: 0 };
+  }
+  chapterRunBusy = true;
+  try {
+    return await runChapterInner(rootDoc, opts);
+  } finally {
+    chapterRunBusy = false;
+  }
+}
+
+async function runChapterInner(
+  rootDoc: Document,
+  opts: RunChapterOptions,
 ): Promise<ChapterResult> {
   const { interTaskDelayMs = 1500, preJumpDelayMs = 3000 } = opts;
 
@@ -102,7 +123,19 @@ export async function runChapter(
           // resolveWorkDoc 等待 work 壳内层 api/work iframe 创建 + .TiMu 渲染（网慢防跳过）
           const doc = await resolveWorkDoc(m.iframe);
           if (doc) {
-            await runFiller(doc, { autoSubmit: true });
+            let summary = await runFiller(doc, { autoSubmit: userSettings.autoSubmit });
+            // 端到端闭环：有题进了 pending 队列（题库暂无答案）→ 原地等待重试，
+            // 等 drain worker 把答案写进题库后自动命中 → 填答 → autoSubmit 提交。
+            // 放弃条件：20 次 × 30s = 10 分钟仍无答案则跳过，避免卡死整门课。
+            let retries = 0;
+            while (summary.pending > 0 && retries < 20) {
+              patchRuntimeState({
+                message: `${summary.pending} 题等答案入库，30s 后重试（${retries + 1}/20）`,
+              });
+              await sleep(30_000);
+              summary = await runFiller(doc, { autoSubmit: userSettings.autoSubmit });
+              retries++;
+            }
             handled++;
           } else {
             console.warn('[course-runner] work iframe 内容加载超时，跳过');

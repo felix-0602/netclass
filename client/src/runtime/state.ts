@@ -53,6 +53,7 @@ export interface RuntimeState {
   answered: number;
   pending: number;
   unsupported: number;
+  mathSkipped: number;      // 数学公式题跳过数
   errors: number;
 
   questions: RuntimeQuestionState[];   // 每题分类，按 index 累加
@@ -97,6 +98,7 @@ export const runtimeState = reactive<RuntimeState>({
   answered: 0,
   pending: 0,
   unsupported: 0,
+  mathSkipped: 0,
   errors: 0,
 
   questions: [],
@@ -132,6 +134,7 @@ export function resetRuntimeForRun(): void {
   runtimeState.answered = 0;
   runtimeState.pending = 0;
   runtimeState.unsupported = 0;
+  runtimeState.mathSkipped = 0;
   runtimeState.errors = 0;
 }
 

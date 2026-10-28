@@ -2,6 +2,7 @@
 
 const KEY_ESSAY = 'netclass:essay_enabled';
 const KEY_ASK_SUBMIT = 'netclass:ask_before_submit';
+const KEY_AUTO_SUBMIT = 'netclass:auto_submit';
 
 function getBool(key: string, fallback: boolean): boolean {
   try {
@@ -32,5 +33,12 @@ export const userSettings = {
   },
   set askBeforeSubmit(v: boolean) {
     setBool(KEY_ASK_SUBMIT, v);
+  },
+
+  get autoSubmit(): boolean {
+    return getBool(KEY_AUTO_SUBMIT, true);
+  },
+  set autoSubmit(v: boolean) {
+    setBool(KEY_AUTO_SUBMIT, v);
   },
 };

@@ -18,6 +18,7 @@ export default defineConfig({
       userscript: {
         name: 'Netclass Sidekick (alpha)',
         namespace: 'netclass-sidekick',
+        version: '0.7.1',
         description: '网课托管工具：自动刷时长 + 自动答题（Phase 0 alpha）',
         author: 'netclass-sidekick',
         match: [

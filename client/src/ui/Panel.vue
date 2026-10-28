@@ -56,6 +56,14 @@
       </strong>
     </div>
 
+    <!-- 跳过计数 -->
+    <div v-if="runtimeState.unsupported > 0" class="ns-skipped">
+      ⊘ 跳过 {{ runtimeState.unsupported }} 题
+      <span v-if="runtimeState.mathSkipped > 0">
+        （数学公式 {{ runtimeState.mathSkipped }}、其他 {{ runtimeState.unsupported - runtimeState.mathSkipped }}）
+      </span>
+    </div>
+
     <!-- 控制台日志区 -->
     <div class="ns-console-wrap">
       <div class="ns-console-toolbar">
@@ -150,6 +158,14 @@
     <div class="ns-actions">
       <button @click="onManualScan" :disabled="!session" :title="!session ? '请先激活卡密' : '立即扫描当前页面题目'">
         扫描
+      </button>
+      <button
+        class="ns-toggle"
+        :class="{ 'ns-toggle--on': autoSubmit }"
+        @click="autoSubmit = !autoSubmit"
+        :title="autoSubmit ? '答题完自动提交（已开）' : '答题完自动提交（已关）'"
+      >
+        自动提交 {{ autoSubmit ? 'ON' : 'OFF' }}
       </button>
       <button @click="$emit('open-settings')">设置</button>
     </div>
@@ -492,8 +508,10 @@ function onToggleAutomation() {
 // 用户偏好设置（响应式绑定 localStorage）
 const essayEnabled = ref(userSettings.essayEnabled);
 const askBeforeSubmit = ref(userSettings.askBeforeSubmit);
+const autoSubmit = ref(userSettings.autoSubmit);
 watch(essayEnabled, (v) => { userSettings.essayEnabled = v; });
 watch(askBeforeSubmit, (v) => { userSettings.askBeforeSubmit = v; });
+watch(autoSubmit, (v) => { userSettings.autoSubmit = v; });
 
 function onStartCourse() {
   if (!runtimeState.automationEnabled) setAutomationEnabled(true);
@@ -680,6 +698,16 @@ function onDragEnd(e: MouseEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 跳过计数 */
+.ns-skipped {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-bottom: 1px solid #ebeef5;
+  flex-shrink: 0;
 }
 
 /* 控制台 */

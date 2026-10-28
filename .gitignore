@@ -61,6 +61,12 @@ coverage/
 # gstack telemetry / session state (local only)
 .gstack/
 
+# local agent / automation scratch（本地调试产物，绝不开源）
+.browser/
+.claude/
+.splitrun/
+
+
 # sqlite 运行时文件
 server/netclass.db
 server/netclass.db-*

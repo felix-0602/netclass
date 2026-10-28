@@ -15,7 +15,9 @@ route.get('/', async (c) => {
   const type = c.req.query('type');
 
   let sql =
-    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, created_at FROM pending_q WHERE attempts < 3';
+    // attempts 不再过滤：drain worker 改为实时消化（runner 原地等待答案），
+    // 老的 attempts<3 过滤会让热重试中的题对 worker 隐身，测验闭环断裂。
+    'SELECT id, platform, q_type, text, options_json, tex_spans_json, image_key, context_json, priority, attempts, needs_vision, created_at FROM pending_q WHERE 1=1';
   const args: Array<string> = [];
   if (platform) {
     sql += ' AND platform = ?';

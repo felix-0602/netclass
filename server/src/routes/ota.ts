@@ -9,8 +9,8 @@ route.get('/version', async (c) => {
   // R2 未启用时（Phase 0 默认）返回内建默认值，客户端仍可运行
   if (!c.env.STORAGE) {
     return c.json({
-      latest: '0.1.0-alpha',
-      min_supported: '0.1.0-alpha',
+      latest: '0.7.1',
+      min_supported: '0.7.1',
       download_url: null,
       sha256: null,
       signature: null,
@@ -22,8 +22,8 @@ route.get('/version', async (c) => {
   const meta = await c.env.STORAGE.get('ota/latest.meta.json');
   if (!meta) {
     return c.json({
-      latest: '0.1.0-alpha',
-      min_supported: '0.1.0-alpha',
+      latest: '0.7.1',
+      min_supported: '0.7.1',
       download_url: new URL('/ota/script', c.req.url).toString(),
       sha256: null,
       signature: null,

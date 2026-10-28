@@ -5,6 +5,7 @@ import { detectPlatform } from './lib/platform';
 import { bootChaoxing } from './adapters/chaoxing';
 import { bootUnipus } from './adapters/unipus';
 import { runFiller } from './answer/filler';
+import { userSettings } from './answer/settings';
 import {
   courseProgress,
   onUrlChangeWhileRunning,
@@ -156,7 +157,7 @@ async function scanCurrent(
     // U 校园：SPA 无 iframe，直接在当前 doc 上跑 filler
     if (kind === 'unipus-page') {
       console.info('[netclass-sidekick] unipus manual scan — running filler directly');
-      await runFiller(rootDoc, { autoSubmit: true });
+      await runFiller(rootDoc, { autoSubmit: userSettings.autoSubmit });
       return;
     }
 

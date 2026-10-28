@@ -49,11 +49,13 @@ export interface Env {
 const app = new Hono<{ Bindings: Env }>();
 
 // CORS：客户端跨域调用
+// 注意：GM 垫层走 fetch + credentials:'include'，ACAO 不能为 '*'（浏览器硬性拒绝），
+// 必须反射请求 origin 并返回 Access-Control-Allow-Credentials: true。
 app.use(
   '*',
   cors({
-    origin: '*', // 生产可收窄到白名单平台
-    allowMethods: ['GET', 'POST'],
+    origin: (origin) => origin || '*', // 生产可收窄到白名单平台
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: [
       'Content-Type',
       'Authorization',
@@ -61,6 +63,7 @@ app.use(
       'X-Device-Fingerprint',
       'X-Admin-Key',
     ],
+    credentials: true,
     maxAge: 86400,
   }),
 );

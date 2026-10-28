@@ -20,6 +20,8 @@ function generateCardKey(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let key = 'NSK-';
   for (let i = 0; i < 8; i++) key += chars[Math.floor(Math.random() * chars.length)]!;
+  key += '-';
+  for (let i = 0; i < 8; i++) key += chars[Math.floor(Math.random() * chars.length)]!;
   return key;
 }
 
@@ -58,7 +60,7 @@ route.post('/generate', async (c) => {
 
   for (let i = 0; i < count; i++) {
     const key = generateCardKey();
-    const hash = sha256Hex(key);
+    const hash = await sha256Hex(key);
     const id = randomId();
 
     let monthlyExp: number | null = null;
